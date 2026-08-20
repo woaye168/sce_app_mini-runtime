@@ -1,0 +1,23 @@
+# Rust build artifacts
+/target/
+
+# Cargo backup files
+**/*.rs.bk
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+
+# Local environment overrides
+.env
+.env.local
