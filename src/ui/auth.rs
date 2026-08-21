@@ -20,7 +20,40 @@ impl App {
         // ---- 当前编辑器凭证 ----
         ui.group(|ui| {
             ui.label(format!("凭证文件：{}", user_info_path.display()));
-            match auth::read_user_info(&user_info_path) {
+
+        // ---- 后台任务回收（验证/刷新登录态都在工作线程，不卡 UI）----
+        if let Some(rx) = &self.verify_rx {
+            if let Ok((label, result)) = rx.try_recv() {
+                self.verify_result = match result {
+                    Ok(text) => format!("{label} 验证通过：{}", &text[..text.len().min(120)]),
+                    Err(e) => format!("{label} 验证失败：{e}"),
+                };
+                self.verify_rx = None;
+            }
+        }
+        let mut refreshed: Option<(String, i64, Option<String>)> = None;
+        if let Some(rx) = &self.refresh_rx {
+            if let Ok((label, result)) = rx.try_recv() {
+                match result {
+                    Ok((uid, name)) => refreshed = Some((label, uid, name)),
+                    Err(e) => self.verify_result = format!("{label} 登录态获取失败：{e}"),
+                }
+                self.refresh_rx = None;
+            }
+        }
+        if let Some((label, uid, name)) = refreshed {
+            match self.cred_store.update_identity(&label, uid, name.clone()) {
+                Ok(_) => {
+                    self.verify_result = format!(
+                        "{label} 登录态已刷新：userid={uid} 昵称={}",
+                        name.unwrap_or_else(|| "（无）".into())
+                    );
+                }
+                Err(e) => self.verify_result = format!("写回凭证库失败：{e}"),
+            }
+        }
+
+        match auth::read_user_info(&user_info_path) {
                 Ok(info) => {
                     ui.label(format!(
                         "状态：{}  token_type={}({})  签名对={}",
@@ -33,9 +66,9 @@ impl App {
                         ui.label("导入为：");
                         ui.text_edit_singleline(&mut self.cred_new_label);
                         if ui.button("导入编辑器凭证").clicked() {
-                            // 名称为空时给默认名，重名自动加序号（之前空名点了没反应，无任何提示）
+                            // 名称为空时按 {userid}_{时间}_{env}_{token_type} 自动命名，重名加序号
                             let base = if self.cred_new_label.trim().is_empty() {
-                                "编辑器凭证".to_string()
+                                auth::make_label(&info, &locate.env_domain)
                             } else {
                                 self.cred_new_label.trim().to_string()
                             };
@@ -69,31 +102,67 @@ impl App {
             let cred = self.cred_store.items[&label].clone();
             ui.horizontal(|ui| {
                 let active = self.cred_store.active_label.as_deref() == Some(label.as_str());
+                let uid_text = cred
+                    .info
+                    .userid
+                    .map(|u| u.to_string())
+                    .unwrap_or_else(|| "无userid".into());
                 ui.label(format!(
-                    "{}{}  [{}]  {}({})",
+                    "{}{}  [{}]  {}({})  uid={}",
                     if active { "★ " } else { "" },
                     label,
                     cred.env_domain,
                     cred.info.token_type,
-                    cred.info.token_type_name()
+                    cred.info.token_type_name(),
+                    uid_text
                 ));
-                if ui.button("切换").clicked() {
+                if ui.button("回写编辑器").clicked() {
                     match self.cred_store.apply(&label, &user_info_path) {
-                        Ok(_) => self.status = format!("已切换到凭证：{label}"),
-                        Err(e) => self.status = format!("切换失败：{e}"),
+                        Ok(_) => self.status = format!("已回写编辑器并设为当前：{label}"),
+                        Err(e) => self.status = format!("回写失败：{e}"),
                     }
                 }
-                if ui.button("验证").clicked() {
-                    self.status = format!("验证中：{label}...");
-                    match verify::verify(&cred.info, &cred.env_domain) {
-                        Ok(text) => {
-                            self.verify_result = format!("{label} 验证通过：{}", &text[..text.len().min(120)]);
-                        }
-                        Err(e) => {
-                            self.verify_result = format!("{label} 验证失败：{e}");
-                        }
+                let busy = self.verify_rx.is_some() || self.refresh_rx.is_some();
+                ui.add_enabled_ui(!busy, |ui| {
+                    if ui.button("验证").clicked() {
+                        self.status = format!("验证中：{label}...");
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let info = cred.info.clone();
+                        let env = cred.env_domain.clone();
+                        let label2 = label.clone();
+                        std::thread::spawn(move || {
+                            let r = verify::verify(&info, &env).map_err(|e| e.to_string());
+                            let _ = tx.send((label2, r));
+                        });
+                        self.verify_rx = Some(rx);
                     }
-                }
+                    if ui.button("刷新登录态").clicked() {
+                        self.status = format!("刷新登录态：{label}（起脱机客户端真实登录，约 1 分钟）...");
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        let info = cred.info.clone();
+                        let env = cred.env_domain.clone();
+                        let label2 = label.clone();
+                        let runtime_dir = std::env::current_exe()
+                            .map(|e| e.with_file_name("runtime"))
+                            .unwrap_or_else(|_| std::path::PathBuf::from("runtime"));
+                        std::thread::spawn(move || {
+                            let r = crate::core::login_state::fetch_identity(
+                                &runtime_dir,
+                                &info,
+                                &env,
+                                std::time::Duration::from_secs(120),
+                            )
+                            .map_err(|e| e.to_string())
+                            .and_then(|id| {
+                                id.userid_i64()
+                                    .map(|uid| (uid, id.user_name_opt()))
+                                    .ok_or_else(|| "登录响应无 userid".to_string())
+                            });
+                            let _ = tx.send((label2, r));
+                        });
+                        self.refresh_rx = Some(rx);
+                    }
+                });
                 if ui.button("删除").clicked() {
                     self.cred_store.items.remove(&label);
                     let _ = self.cred_store.save();

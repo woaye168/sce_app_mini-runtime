@@ -26,6 +26,28 @@ impl App {
             None => { ui.label("无激活凭证（先到「凭证」页导入/登录）"); }
         }
 
+        // 运行时选择（编辑器-api 为默认；对战平台测试/正式为既有 scegame 链路）
+        let project_api = crate::core::debug::read_map_settings(&project)
+            .map(|(_, api)| api)
+            .unwrap_or(13);
+        let kind_options = [
+            format!("星火编辑器-{project_api} 运行时（默认）"),
+            "星火对战平台 测试环境运行时".to_string(),
+            "星火对战平台 正式环境运行时".to_string(),
+        ];
+        let selected_kind = match self.debug_kind_sel {
+            1 => Some(crate::core::runtimes::RuntimeKind::TesterTest),
+            2 => Some(crate::core::runtimes::RuntimeKind::TesterProd),
+            _ => None, // 默认编辑器-api
+        };
+        egui::ComboBox::from_label("运行时")
+            .selected_text(&kind_options[self.debug_kind_sel.min(2)])
+            .show_ui(ui, |ui| {
+                for (i, name) in kind_options.iter().enumerate() {
+                    ui.selectable_value(&mut self.debug_kind_sel, i, name);
+                }
+            });
+
         // 参数区
         if self.debug_runtime_input.is_empty() {
             self.debug_runtime_input = std::env::current_exe()
@@ -43,9 +65,22 @@ impl App {
         if self.debug_staging_input.is_empty() {
             ui.label("暂存留空 = 自动生成（白名单复制+入口包装）");
         }
+        // userid 自动填充：输入框空且激活凭证已有登录态时自动带入（可手改覆盖）
+        if self.debug_userid_input.trim().is_empty() {
+            if let Some(label) = &active {
+                if let Some(cred) = self.cred_store.items.get(label) {
+                    if let Some(uid) = cred.info.userid {
+                        self.debug_userid_input = uid.to_string();
+                    }
+                }
+            }
+        }
         ui.horizontal(|ui| {
             ui.label("userid:");
             ui.text_edit_singleline(&mut self.debug_userid_input);
+            if self.debug_userid_input.trim().is_empty() {
+                ui.label("（留空=取凭证登录态；无则到「凭证」页点「刷新登录态」）");
+            }
         });
         ui.add_space(6.0);
 
@@ -61,6 +96,17 @@ impl App {
                     Err(e) => self.status = format!("启动失败：{e}"),
                 }
                 self.debug_start_rx = None;
+                self.debug_progress_rx = None;
+            }
+        }
+        // payload sync 进度展示
+        if let Some(rx) = &self.debug_progress_rx {
+            let mut last = None;
+            while let Ok(msg) = rx.try_recv() {
+                last = Some(msg);
+            }
+            if let Some(msg) = last {
+                self.status = msg;
             }
         }
 
@@ -76,33 +122,77 @@ impl App {
                         self.status = format!("凭证不存在: {label}");
                         return;
                     };
+                    // userid：输入框优先，空则取凭证登录态
                     let userid: i64 = match self.debug_userid_input.trim().parse() {
                         Ok(v) => v,
-                        Err(_) => {
-                            self.status = "userid 必须是数字".into();
-                            return;
-                        }
+                        Err(_) => match cred.info.userid {
+                            Some(v) => v,
+                            None => {
+                                self.status = "userid 为空且凭证无登录态——先到「凭证」页点「刷新登录态」".into();
+                                return;
+                            }
+                        },
                     };
                     let staging_text = self.debug_staging_input.trim().to_string();
+                    let kind = selected_kind;
+                    let env_domain = kind
+                        .map(|k| k.env_domain().to_string())
+                        .unwrap_or_else(|| cred.env_domain.clone());
                     let params = DebugParams {
                         project_root: project.clone(),
                         runtime_dir: PathBuf::from(self.debug_runtime_input.trim()),
                         staging_dir: if staging_text.is_empty() { None } else { Some(PathBuf::from(staging_text)) },
                         cred: cred.info.clone(),
                         userid,
-                        env_domain: cred.env_domain.clone(),
+                        env_domain,
+                        runtime_kind: kind,
                     };
                     let (tx, rx) = std::sync::mpsc::channel();
+                    let (prog_tx, prog_rx) = std::sync::mpsc::channel::<String>();
                     std::thread::spawn(move || {
+                        // 引擎未就绪时自动 payload sync（用户报过的「运行时没下载」痛点）
+                        let kind_eff = params
+                            .runtime_kind
+                            .unwrap_or(crate::core::runtimes::RuntimeKind::EditorApi(project_api));
+                        if !kind_eff.engine_ready(&params.runtime_dir) {
+                            let _ = prog_tx.send(format!(
+                                "运行时 {} 未就绪，自动下载载荷中（首次约 150MB）...",
+                                kind_eff.display_name()
+                            ));
+                            let project_libs = std::fs::read_to_string(params.project_root.join("libs.json"))
+                                .ok()
+                                .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+                                .and_then(|v| v.as_object().map(|o| o.keys().cloned().collect()))
+                                .unwrap_or_else(Vec::new);
+                            let sync_params = crate::core::payload::SyncParams {
+                                runtime_dir: params.runtime_dir.clone(),
+                                env_domain: params.env_domain.clone(),
+                                api_version: kind_eff.api_version(project_api),
+                                project_libs,
+                                project_root: Some(params.project_root.clone()),
+                                dry_run: false,
+                                runtime_kind: Some(kind_eff),
+                            };
+                            let prog_tx2 = prog_tx.clone();
+                            let mut log = move |msg: String| {
+                                let _ = prog_tx2.send(format!("[载荷] {msg}"));
+                            };
+                            if let Err(e) = crate::core::payload::sync(&sync_params, &mut log) {
+                                let _ = tx.send(StartOutcome { result: Err(format!("载荷同步失败: {e}")) });
+                                return;
+                            }
+                            let _ = prog_tx.send("载荷同步完成，启动调试中...".to_string());
+                        }
                         let result = DebugSession::start(&params).map_err(|e| e.to_string());
                         let _ = tx.send(StartOutcome { result });
                     });
                     self.debug_start_rx = Some(rx);
+                    self.debug_progress_rx = Some(prog_rx);
                     self.status = "启动中（assign_host→上传→起局）...".into();
                 }
             });
             if busy {
-                ui.label("启动中（assign_host→上传→起局）...");
+                ui.label("启动中（见状态栏进度）...");
             }
         } else {
             if let Some(session) = &mut self.debug_session {

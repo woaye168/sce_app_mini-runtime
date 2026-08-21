@@ -23,6 +23,8 @@ pub struct DebugParams {
     pub userid: i64,
     /// 环境域（默认 editor-pd.spark.xd.com）
     pub env_domain: String,
+    /// 运行时种类（缺省 = 编辑器-api<项目 api_version>）
+    pub runtime_kind: Option<crate::core::runtimes::RuntimeKind>,
 }
 
 /// 调试会话
@@ -186,6 +188,11 @@ fn spawn_detached(exe: &Path, args: &[String], cwd: &Path) -> Result<u32> {
     Ok(child.id())
 }
 
+/// 公开包装：供 login_state 等复用（拉起脱机 scegame）
+pub fn spawn_detached_pub(exe: &Path, args: &[String], cwd: &Path) -> Result<u32> {
+    spawn_detached(exe, args, cwd)
+}
+
 impl DebugSession {
     /// 完整 B 模式启动：assign_host → 控制连接上传 → EditorStartGame → spawn 客户端
     pub fn start(params: &DebugParams) -> Result<Self> {
@@ -237,9 +244,17 @@ impl DebugSession {
         log_warn(&format!("远端局已起: session_id={session_id}"));
 
         // ④ spawn 客户端（实捕官方命令行契约，CreateProcess 数组传参无 shell 拆参问题）
-        let exe = params.runtime_dir.join("scegame.exe");
+        // 引擎目标按运行时种类：编辑器=version-<api>/SCE（sceengine.dll 壳）；对战平台=scegame.exe
+        let kind = params
+            .runtime_kind
+            .unwrap_or(crate::core::runtimes::RuntimeKind::EditorApi(api_version));
+        let exe = kind.client_exe(&params.runtime_dir);
         if !exe.is_file() {
-            return Err(anyhow!("scegame.exe 不存在: {}", exe.display()));
+            return Err(anyhow!(
+                "游戏客户端不存在: {}（运行时 {} 未就绪，先 payload sync）",
+                exe.display(),
+                kind.display_name()
+            ));
         }
         let dir_name = params
             .project_root
@@ -266,7 +281,7 @@ impl DebugSession {
             "-height=900".to_string(),
         ];
         let child_pid = spawn_detached(&exe, &client_args, &params.runtime_dir)?;
-        log_warn(&format!("客户端已拉起 pid={child_pid}"));
+        log_warn(&format!("客户端已拉起 pid={child_pid}（引擎 {}）", kind.display_name()));
 
         // pidfile：<staging>.pid（debug stop 用）
         let pid_file = staging_dir.with_extension("pid");

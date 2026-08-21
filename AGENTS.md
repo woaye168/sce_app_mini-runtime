@@ -4,7 +4,7 @@
 
 ## 项目定位
 
-脱机运行时（sce_app_mini-runtime）：独立的 egui 桌面应用。核心能力是 **B 模式（本地工程调试）完全脱机运行**——不依赖星火编辑器/对战平台，自带载荷同步（官方 update-info 通道下载）、staging 生成、控制协议客户端（上传工程、起局、host 日志）、游戏进程拉起与截屏自验。通过宿主 [bgd_sce_tools](https://github.com/woaye168/bgd_sce_tools) 的「应用市场」安装分发，宿主启动时传 `--project-path <项目根>`。应用单实例；`--background` 静默驻留；`--quit` 优雅退出；窗口 X = 正常退出。
+脱机运行时（sce_app_mini-runtime）：独立的 egui 桌面应用。核心能力是 **B 模式（本地工程调试）完全脱机运行**——不依赖星火编辑器/对战平台，自带载荷同步（官方 update-info 通道下载）、staging 生成、控制协议客户端（上传工程、起局、host 日志）、游戏进程拉起与截屏自验。**运行时按项目 api_version 可切换**（core/runtimes.rs）：默认「星火编辑器-api\<N\> 运行时」（引擎 = wineditor@api 包解出的 version-\<N\>/SCE 壳 + sceengine.dll），另保留「星火对战平台 测试/正式环境运行时」（scegame 一体引擎，0.2.0 既有链路）。通过宿主 [bgd_sce_tools](https://github.com/woaye168/bgd_sce_tools) 的「应用市场」安装分发，宿主启动时传 `--project-path <项目根>`。应用单实例；`--background` 静默驻留；`--quit` 优雅退出；窗口 X = 正常退出。
 
 ## 技术栈与规范
 
@@ -18,9 +18,11 @@
 ```
 src/main.rs            # 入口（bgd_appsdk 统一入口 + 业务 CLI 分发）+ 应用状态 + 壳实现
 src/core/mod.rs        # 模块声明
-src/core/auth.rs       # 凭证库（多账号 list/use/import）
+src/core/auth.rs       # 凭证库（多账号 list/use/import；make_label 命名 {userid}_{时间}_{env}_{type}）
 src/core/login.rs      # 扫码登录
+src/core/login_state.rs # 登录态获取（起脱机客户端真实登录，从 logs/game 抓 userid；注入凭证强制 login=1）
 src/core/verify.rs     # 凭证校验
+src/core/runtimes.rs   # 运行时切换架子（RuntimeKind：编辑器-api/对战平台测试/正式；引擎包/spawn 目标/env 域）
 src/core/host.rs       # 调试 host 控制协议（EditorLogin/上传/起局/host 日志，手写 protobuf wire）
 src/core/payload.rs    # 载荷同步：update-info + OSS 下载 + TNND/UPAK 落位 + 注册表合成 + 基座资产
 src/core/staging.rs    # 调试 staging 生成（白名单拷贝 + ui/script/main.lua 包装）
@@ -37,6 +39,11 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 
 ## 核心机制（改代码前必读）
 
+- **运行时切换（runtimes.rs）**：`RuntimeKind = EditorApi(api) | TesterTest | TesterProd`，决定引擎包（wineditor/win）、update-info variation（windows_editor/client）、env 域、spawn 目标（`version-<api>/SCE` / `scegame.exe`）。默认 = 项目 map_settings.json 的 api_version 对应的编辑器运行时；GUI 调试页下拉/CLI `--kind editor-<api>|tester_test|tester_prod` 可切。两套运行时结构相同（控制协议/staging/上传链不变，仅引擎与 spawn 目标不同）。详见 doc/research/runtimes.md。
+- **编辑器引擎自举**：wineditor 是普通 update-info 包，版本号取 `api_pak_version.json[<api>].wineditor`（api13→147）；下载 OSS `windows_game.7z` 解出 `version-<api>/`（SCE 壳 + sceengine.dll + 一套 dll）+ 基座 res。**不要再从本机编辑器安装目录复制引擎**。
+- **依赖库版本权威 = api_pak_version.json[\<api\>] 注册表**（不是 update-info 返回的最新版），落位 `_m/maps/`、`_m/maps/script_libs/`、`_m/maps/user_libs/`（与编辑器一致）。
+- **启动调试自动补载荷**：GUI/工作线程在 spawn 前检查 `engine_ready`，未就绪自动 `payload sync`（进度上状态栏）。
+- **userid 自动获取**：凭证文件无 userid（login 字段是 0/1 登录状态）；`auth refresh <凭证名>` / 凭证页「刷新登录态」起脱机客户端真实登录，从 `logs/game/` 抓 `GamePlayOnline request login, userid:` 行。**注入凭证必须强制 login=1**（大厅 after_update 的自动登录闸门），否则僵在登录按钮超时。详见 doc/research/credential-userid.md §4.1。
 - **控制协议**（详见 doc/research/scegame-reverse.md §8）：TCP 直连 debug host；帧 = u32 LE 总长 + 0x00 + envelope；0xF000 段消息。大文件上传 = **0xF004 空声明（无 f3）→ 0xF008 分块（101400B）→ 0xF00A**；上传路径**全小写**（host 是 Linux 大小写敏感）。
 - **载荷 0 依赖**：`payload sync` 走官方 `update-info`（query-string POST 空 body 免签名）+ OSS 公共读下载；每次 sync 实时查询 = 自动跟随星火服务器侧版本更新；部分包 TNND 加密（XOR CREATEEASY）需识别解密；`_m` 注册表包需 UPAK 解散文件 + 合成 api_pak_version.json（items 全量登记）。
 - **基座资产**（update-info 不分发：ui/font/regular 字体族、fonts、characters、effect）：本机编辑器兜底复制（tsconfig 推导）→ 否则下载本仓库 release 的 base_assets.7z（**仓库私有，走 GitHub API + token**：env `MINI_RUNTIME_GITHUB_TOKEN` → 凭据管理器 `bgd_sce_tools/github_token`；env `MINI_RUNTIME_BASE_ASSETS_URL` 可覆盖为公开直链）。重新打包：`examples/pack_base_assets.ps1` 后 `gh release upload <tag> --clobber`。
@@ -52,6 +59,9 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 | `restore_game` | 加密包一键还原：TNND → 7z → UPAK → 伪 KTX 图片转 PNG（BC1/2/3/7） |
 | `proto_extract` | 从 protobuf C++ 二进制提取内嵌 FileDescriptorProto |
 | `find_xref` / `disasm_at` | PE 字符串 RIP-xref 查找 / 线性反汇编（PE 解析手写在 examples/util） |
+| `pe_imports` / `pe_exports` | PE 导入/导出表 dump（定位 TLS 栈归属等） |
+| `entrance_login_capture` | WSS 明文截获（spawn 挂起 → hook libgmessl SSL_read/write + ws2_32 connect 对照）→ jsonl |
+| `probe_wineditor` / `probe_libs` | wineditor 可下载性验证 / 依赖库三 variation 对比 |
 | `decode_kid` | 解码凭证 token 的 kid 段 |
 | `assemble_runtime.ps1` | 本机官方目录组装载荷（payload sync 的本机兜底） |
 | `pack_base_assets.ps1` | 从本机编辑器目录重打 base_assets.7z |

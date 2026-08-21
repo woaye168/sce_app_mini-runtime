@@ -43,6 +43,15 @@ pub struct SyncParams {
     pub project_root: Option<PathBuf>,
     /// 可选：只打印将下载什么
     pub dry_run: bool,
+    /// 运行时种类（决定引擎包与 spawn 目标；缺省编辑器-api）
+    pub runtime_kind: Option<crate::core::runtimes::RuntimeKind>,
+}
+
+impl SyncParams {
+    pub fn kind(&self) -> crate::core::runtimes::RuntimeKind {
+        self.runtime_kind
+            .unwrap_or(crate::core::runtimes::RuntimeKind::EditorApi(self.api_version))
+    }
 }
 
 fn http_client() -> Result<reqwest::blocking::Client> {
@@ -55,11 +64,16 @@ fn http_client() -> Result<reqwest::blocking::Client> {
 }
 
 /// 查 update-info（query-string POST，空 body，免签名——抓包/试调实证）
+/// variation：client=游戏/对战平台侧；windows_editor=编辑器侧（引擎包 wineditor 走这个）
 pub fn update_info(names: &[String], api_version: u32) -> Result<Vec<UpdateItem>> {
+    update_info_var(names, api_version, "client")
+}
+
+pub fn update_info_var(names: &[String], api_version: u32, variation: &str) -> Result<Vec<UpdateItem>> {
     let list = names.join(";");
     let url = format!(
-        "https://updater-pd.tapsce.cn/api/map/update-info?list={}&version=2&api_version={}&sample=0&suffix=client&default_part=1",
-        list, api_version
+        "https://updater-pd.tapsce.cn/api/map/update-info?list={}&version=2&api_version={}&sample=0&suffix=client&default_part=1&variation={}",
+        list, api_version, variation
     );
     let client = http_client()?;
     let resp = client
@@ -94,18 +108,42 @@ pub fn update_info(names: &[String], api_version: u32) -> Result<Vec<UpdateItem>
 
 /// 同步载荷：查询 → 下载 → 解包 → 落位 → 合成版本注册表
 pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
-    // ① 组包名清单
+    let kind = params.kind();
+    let engine_pkg = kind.engine_package();
+    log(format!("运行时：{}（引擎包 {engine_pkg}）", kind.display_name()));
+
+    // ① 组包名清单（引擎包名按运行时；编辑器引擎走 wineditor + windows_editor 变体）
     let mut names: Vec<String> = REGISTRY_PACKAGES
         .iter()
         .chain(BASE_PACKAGES.iter())
         .map(|s| s.to_string())
         .collect();
-    names.push(ENGINE_PACKAGE.to_string());
+    if engine_pkg != ENGINE_PACKAGE {
+        names.push(engine_pkg.to_string());
+    } else {
+        names.push(ENGINE_PACKAGE.to_string());
+    }
     for lib in &params.project_libs {
         names.push(lib.clone());
     }
     log(format!("查询 update-info（{} 个包，api_version={}）...", names.len(), params.api_version));
-    let items = update_info(&names, params.api_version)?;
+    // 编辑器引擎包用 windows_editor 变体查（wineditor 在该变体下）；lua 包用默认 client
+    let mut items = update_info_var(&names, params.api_version, kind.update_variation())?;
+    if kind.update_variation() != "client" {
+        // wineditor 变体下 lua 包可能不全，补一次 client 变体查（去重）
+        let lua_names: Vec<String> = REGISTRY_PACKAGES
+            .iter()
+            .chain(BASE_PACKAGES.iter())
+            .map(|s| s.to_string())
+            .chain(params.project_libs.iter().cloned())
+            .collect();
+        let extra = update_info_var(&lua_names, params.api_version, "client")?;
+        for e in extra {
+            if !items.iter().any(|x| x.name == e.name && x.version == e.version) {
+                items.push(e);
+            }
+        }
+    }
     log(format!("在线版本解析到 {} 个包", items.len()));
 
     let mut registry: Vec<(String, u64)> = Vec::new(); // (name, version) 已落位
@@ -119,9 +157,10 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
             continue;
         }
         let (dest_dir, dest_note) = target.unwrap();
-        // 引擎包以 scegame 存在与否判重；包以落位目录判重
-        let already = if item.name == ENGINE_PACKAGE {
-            params.runtime_dir.join("scegame").exists() || params.runtime_dir.join("scegame.exe").exists()
+        // 引擎包以 spawn 目标存在与否判重（win→scegame.exe；wineditor→version-<api>/SCE）；包以落位目录判重
+        let kind = params.kind();
+        let already = if item.name == ENGINE_PACKAGE || item.name == "wineditor" {
+            kind.engine_ready(&params.runtime_dir)
         } else {
             dest_dir.exists()
         };
@@ -366,8 +405,10 @@ fn place_target(params: &SyncParams, item: &UpdateItem) -> Option<(PathBuf, Stri
         .join(&params.env_domain)
         .join("Res");
     let name = item.name.as_str();
-    // 引擎包：内容即 Win 根（scegame/dll/embedded_packages/update 骨架），直接解压到载荷根
-    if name == ENGINE_PACKAGE {
+    // 引擎包：内容即引擎根，解压到载荷根
+    // - win（对战平台）：内容 = Win 根（scegame/dll/embedded_packages/update 骨架）
+    // - wineditor（编辑器）：内容 = version-<api>/ + launcher_update/ + update/<env>/res 基座
+    if name == ENGINE_PACKAGE || name == "wineditor" {
         return Some((params.runtime_dir.clone(), "runtime 根（引擎）".into()));
     }
     // 注册表版本包 → _m 形态（_m/<sub>/<ver>/<name>/<name>.pak）

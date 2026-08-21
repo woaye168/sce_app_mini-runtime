@@ -65,3 +65,65 @@ D:\sce_online\
 3. **version 目录名 = api_version**（version-13 对应 api_version=13），与 map_settings.json 的 api_version 对应。
 4. **凭证文件位置**：`<运行根>/User/user_info-<env_domain>.json`（如 `D:\sce_online\User\user_info-editor-pd.spark.xd.com.json`）。
 5. **B 模式永远带 `-no_update`**：否则 scegame 自更新会清掉手工组装的载荷。
+
+## 6. ★ 引擎的在线分发机制（2026-08-21 逆向 client_base update 链 + api_pak_version.json 实证）
+
+这是「运行时按 api_version 组装 + 编辑器同款下载机制」的核心，mini-runtime 的 runtimes 架子以此为准。
+
+### 6.1 api_version 是组装的总钥匙
+
+`api_pak_version.json`（`update/<env>/` 下）顶层键 = `#package_path` + 各 api 版本表（`-1`/`12`/`13`/`2000`）。
+项目 `map_settings.json` 的 `api_version`（如 13）→ 决定两套东西：
+- **引擎**：`<运行根>/version-<api_version>/`（version-13 对应 api13；version-2000 对应新客户端）
+- **lua 运行时包**：`<api_version>` 表里的 `{包名: 版本}` → 经 `#package_path` 映射到 `Res/_m/...` 真实路径
+
+### 6.2 引擎二进制 = update-info 的一个普通包（按 api 选版本）
+
+编辑器引擎（SCE 壳 + sceengine.dll + 依赖 dll）**不是安装包独占**，而是经 update-info 以**二进制包**形式分发，版本号按 api_version 选：
+
+| 二进制包名 | 含义 | 实证 |
+| --- | --- | --- |
+| `win` | **对战平台引擎**（tester 的 scegame 一体） | api13 表无此项（tester 用） |
+| `wineditor` | **编辑器引擎**（含 version-\<api\> 的 sceengine.dll + SCE 壳 + 全套依赖 + 基座 res） | `api_pak_version.json` 的 `13.wineditor = 147` ←→ version-13\sceengine.dll PV=147；`2000.wineditor = 148` ←→ version-2000\sceengine.dll PV=148 |
+
+**下载机制（编辑器同款，client_base-78 `update/download_manager.lua` + `update/init.lua` 实证）：**
+1. `update-info?list=wineditor;...&api_version=<api>&variation=windows_editor` → 得 wineditor 的 `{version, url, md5, size, original_size, path, ...}`。
+2. **版本选哪个由 api_pak_version.json[\<api\>].wineditor 定**（147），不是盲目下最新——这就是「按 api 组装」。
+3. 下载 url（OSS）→ 7z 解出 → **整棵 version-\<api\>/ 目录 + launcher_update/ + update/\<env\>/res 基座包**。wineditor 是**自包含的引擎运行时**（含 version-\<api\> 全部 dll + res 散包 + embedded_packages）。
+4. 安装到 `<运行根>/version-<api>`；`platform.binary()` 返回当前二进制名（编辑器=`wineditor`），`download_manager` 据此判断要不要更新（编辑器允许更新成低版本）。
+
+### 6.3 version-\<api\> 目录内容（version-13 实测）
+
+```
+version-13\
+  SCE                  # 739KB 游戏客户端壳（-env=game ... 跑游戏）
+  sceengine.dll        # 50MB 引擎（PV=147 = api13.wineditor）
+  sce.dll / sce.deps.json / scemodule.dll / scecustomcontrol.dll   # .NET 互操作桥
+  gmesdk.dll / sdk.dll / themis_x64.dll / lua54.dll / lite.dll / shaderc.dll / embree4.dll / ...
+  commandtool.exe      # 无 GUI 命令行工具（Pack/MapRef/纹理压缩——脱机发布打图集用）
+  embedded_packages\   # 内嵌包（client_base-78.7z / script-199.7z / startup-364.7z / appui / xdeditor_startup）
+  SCE.WebView2/  assets/  microsoft.ui.xaml/  ...   # 编辑器 UI 壳资源（跑游戏不需要）
+```
+
+- 跑游戏只用 **SCE + sceengine.dll + 游戏依赖 dll**（gmesdk/sdk/themis/lua54/lite/shaderc/embree4/tbb12 等）+ **lua 运行时包**（来自 update/\<env\>/res）。
+- `星火编辑器.exe`（宿主）只是 GUI 外壳，**跑游戏不需要它**——它按 api_version spawn `version-<api>/SCE`。
+- version-13 无 `res/` 子目录——lua 包在 `update/<env>/res/`（全局共享，不按 version 隔离）。
+
+### 6.4 对 mini-runtime 的直接推论
+
+- **「星火编辑器-13 运行时」自举 = 下载 wineditor@147 + 取其中 version-13 的游戏必需子集**（SCE+sceengine.dll+游戏dll+embedded_packages），lua 包走现有 update-info 通道。
+- 现有 B 模式的「控制协议上传/起局」与引擎解耦（spawn 的是客户端 exe）；换引擎 = 只换 spawn 目标从「tester scegame.exe」→「编辑器 version-13\SCE」。
+- **基座资产其实随 wineditor 自带**（wineditor 含 update/\<env\>/res 基座包）——之前的 base_assets.7z 通道可降级为兜底。
+
+### 6.5 wineditor@147 实测（2026-08-21，地基验证）
+
+```
+update-info: list=wineditor & api_version=13 & variation=windows_editor
+→ name=wineditor version=147 size=144MB
+  url=sce-maps-pd.oss-cn-shanghai.aliyuncs.com/wineditor/master/Version/147/windows_game.7z
+下载解出顶层 = launcher_update/ + update/<env>/res/ + version-13/ + variation.json
+version-13/ 实测：SCE(739KB) + sceengine.dll(50MB, PV=147) + gmesdk/sdk/themis/lua54/lite/shaderc/embree4/commandtool.exe + embedded_packages/(client_base-78/script-199/startup-364/appui/xdeditor_startup)
+update/<env>/res/ = client_base/engineres/fonts/lite/refconfig/shadercache_windows_ui/startup/uistyle/xdeditor/xdeditor_startup
+```
+
+**结论：编辑器-13 运行时可完全脱机自举**（wineditor@147 一个包给齐引擎+基座 res），无需本机装编辑器。

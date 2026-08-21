@@ -6,6 +6,50 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// 按用户要求的凭证名格式生成：{userid}_{YYYYMMDD_HHMMSS}_{env}_{token_type}
+/// userid 缺（旧凭证没有字段）时用 `no-uid` 占位。
+pub fn make_label(info: &UserInfo, env_domain: &str) -> String {
+    let uid = info
+        .userid
+        .map(|u| u.to_string())
+        .unwrap_or_else(|| "no-uid".into());
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    // 转本地时间 YYYYMMDD_HHMMSS（UTC+8）
+    let t = now + 8 * 3600;
+    let (y, mo, d, h, mi, s) = epoch_to_ymd(t);
+    format!(
+        "{uid}_{y:04}{mo:02}{d:02}_{h:02}{mi:02}{s:02}_{}_{}",
+        env_domain, info.token_type
+    )
+}
+
+/// unix 秒（UTC+8 已偏移）→ (年,月,日,时,分,秒)，civil-from-days 算法
+fn epoch_to_ymd(t: u64) -> (i64, u32, u32, u32, u32, u32) {
+    let days = (t / 86400) as i64;
+    let secs = t % 86400;
+    let z = days + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = (z - era * 146097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = if mo <= 2 { y + 1 } else { y };
+    (
+        y,
+        mo,
+        d,
+        (secs / 3600) as u32,
+        (secs % 3600 / 60) as u32,
+        (secs % 60) as u32,
+    )
+}
+
 /// 编辑器凭证文件（User/user_info-<env>.json）的关键字段
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct UserInfo {
@@ -27,6 +71,12 @@ pub struct UserInfo {
     pub token_type: i64,
     #[serde(default)]
     pub version: i64,
+    /// 账号数字 userid（最新登录态写盘；旧凭证可能没有该字段）
+    #[serde(default)]
+    pub userid: Option<i64>,
+    /// 账号昵称（展示用，登录态提供）
+    #[serde(default)]
+    pub user_name: Option<String>,
 }
 
 impl UserInfo {
@@ -46,6 +96,12 @@ impl UserInfo {
             999 => "游客",
             _ => "未知",
         }
+    }
+
+    /// 账号数字 userid：读凭证字段（最新登录态写盘；旧凭证没有则 None）。
+    /// 注意：token 的 kid 段是 opaque 随机字节，**不是** protobuf，不能从中解 userid（0.2.1 探针实证）。
+    pub fn userid(&self) -> Option<i64> {
+        self.userid
     }
 }
 
@@ -126,5 +182,18 @@ impl CredentialStore {
         self.active_label = Some(label.to_string());
         self.save()?;
         Ok(())
+    }
+
+    /// 刷新某条目的 userid/user_name（登录态字段），并落盘
+    pub fn update_identity(&mut self, label: &str, userid: i64, user_name: Option<String>) -> Result<()> {
+        let cred = self
+            .items
+            .get_mut(label)
+            .ok_or_else(|| anyhow!("凭证不存在: {label}"))?;
+        cred.info.userid = Some(userid);
+        if user_name.is_some() {
+            cred.info.user_name = user_name;
+        }
+        self.save()
     }
 }

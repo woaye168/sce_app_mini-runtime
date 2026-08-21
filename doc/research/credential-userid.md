@@ -39,14 +39,32 @@ lobby.request_token_login(token_type, token)   # native 长连接（WSS）登录
 
 ## 4. 脱机获取 userid 的正确方式（不依赖编辑器）
 
-**用我们自己的 scegame 跑一次真实登录，登录成功后从 lua 层读出 userid 写结果文件**：
+**用我们自己的游戏客户端跑一次真实登录，从游戏日志抓 userid 行**（`core/login_state.rs::fetch_identity` 已实现，CLI `auth refresh <凭证名>`）：
 
-1. spawn 脱机 scegame（win 包引擎即可，登录能力与编辑器一致），带 `-env=game -server=<env> -use_local_res -no_update`，凭证预置到 `runtime/User/user_info-<env>.json`。
-2. 引擎启动会走 account.login → entrance 登录（tester 的 startup/entrance 链）。
-3. 登录回调里 `account.latest_login_info.user_id` 就是真值——**已实证**：我们的 spawn 日志出现 `GamePlayOnline request login, userid: 38672742`（即登录成功并拿到 userid）。
-4. 在 lua 侧（或读它的登录日志/内存）把 user_id/user_name 落到一个结果文件，host 进程读回即可。
+1. 凭证预置到 `runtime/User/user_info-<env>.json`，**`login` 字段必须强制置 1**（见 §4.1，这是编辑器/大厅运行时通用的自动登录闸门）。
+2. spawn 脱机客户端（编辑器运行时 = `version-<api>/SCE`，对战平台 = `scegame.exe`），带 `-env=game -server=<env> -use_local_res -no_update`（编辑器壳追加 `-editor_api_version=<api>`）。
+3. 引擎自动走 account.login → entrance 登录 → 进 app_box 默认图 → 游戏日志出现 `GamePlayOnline request login, userid: <N>, username: <N>`。
+4. 轮询 `logs/game/` 最新日志抓该行即得 userid，抓到即杀进程。**编辑器-13 运行时实测通过**（2026-08-21：version-13\SCE 抓到 userid=38672742）。
 
-> 这是「与编辑器同源码的脱机版本」的正解——全程不碰编辑器，用脱机 scegame 自己的登录链。
+### 4.1 关键坑：login=1 是自动登录总闸门（编辑器运行时实测）
+
+凭证文件 `login` 字段语义 =「是否已登录过」。大厅链 `startup/entrance/main.lua` 的 `after_update()` 里：
+
+```lua
+if account.get_login_state() == 1 then   -- 读的就是凭证 login 字段
+    account.login(TO_START_GAME_MAP == 'app_box')   -- 自动登录
+else
+    ... ShowLoginButton(true)   -- 停在大厅登录按钮等人点
+end
+```
+
+凭证库收割来的凭证 `login` 常为 0（编辑器某些路径不清置/登出时清 0）。login=0 时大厅停在登录按钮界面，**永远不会触发 GamePlayOnline，日志抓取超时**（0.2.2 实证踩坑：SCE 大厅 wss 连上 entrance 发了 0x6001 却僵住 90s 超时）。fetch_identity 注入凭证时强制 `login=1` 后即通。
+
+另外两处实证纠偏：
+- `account.save()` 只序列化 `account_data`（**不含 userid**），所以「登录后回读凭证文件拿 userid」走不通——userid 只能走日志/内存（client_base-78 account.lua:239-249 实证）。
+- `account.on_login_result` 里 `log_file.debugf('[account] 收到登录事件, user[...]')` 是 debug 级，lua-application 日志默认只写 info 级，**抓不到**——所以走 GamePlayOnline 的 game 日志行。
+
+> 这是「与编辑器同源码的脱机版本」的正解——全程不碰编辑器，用脱机客户端自己的登录链。
 
 ## 5. WSS 明文抓取（为什么之前抓不到 + 怎么抓）
 

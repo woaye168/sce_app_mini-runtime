@@ -175,8 +175,52 @@ fn cli_auth(args: &[String]) {
                 Err(e) => eprintln!("申请 device_code 失败: {e}"),
             }
         }
+        Some("refresh") => {
+            // auth refresh <凭证名> [--runtime <载荷目录>] [--timeout <秒>]——起脱机客户端真实登录，抓 userid/昵称写回凭证库
+            let Some(label) = args.get(1) else {
+                eprintln!("用法: auth refresh <凭证名> [--runtime <载荷目录>] [--timeout <秒>]");
+                return;
+            };
+            let mut runtime = None;
+            let mut timeout = 60u64;
+            let mut i = 2;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--runtime" => { runtime = args.get(i + 1).cloned(); i += 2; }
+                    "--timeout" => { timeout = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(timeout); i += 2; }
+                    other => { eprintln!("未知参数: {other}"); return; }
+                }
+            }
+            let runtime_dir = runtime.map(PathBuf::from).unwrap_or_else(|| {
+                std::env::current_exe()
+                    .map(|e| e.with_file_name("runtime"))
+                    .unwrap_or_else(|_| PathBuf::from("runtime"))
+            });
+            let mut store = core::auth::CredentialStore::load();
+            let Some(cred) = store.items.get(label) else {
+                eprintln!("凭证不存在: {label}");
+                return;
+            };
+            println!("起脱机客户端登录中（最长 {timeout}s）...");
+            match core::login_state::fetch_identity(
+                &runtime_dir,
+                &cred.info,
+                &cred.env_domain,
+                std::time::Duration::from_secs(timeout),
+            ) {
+                Ok(id) => {
+                    let uid = id.userid_i64().unwrap_or(0);
+                    let name = id.user_name_opt();
+                    match store.update_identity(label, uid, name.clone()) {
+                        Ok(_) => println!("已刷新：userid={uid} 昵称={}", name.unwrap_or_else(|| "（无）".into())),
+                        Err(e) => eprintln!("写回凭证库失败: {e}"),
+                    }
+                }
+                Err(e) => eprintln!("登录态获取失败: {e}"),
+            }
+        }
         _ => {
-            eprintln!("auth 子命令: list | verify [凭证名] | import <凭证名> <项目路径> | login <项目路径>");
+            eprintln!("auth 子命令: list | verify [凭证名] | import <凭证名> <项目路径> | login <项目路径> | refresh <凭证名> [--runtime <载荷目录>]");
         }
     }
 }
@@ -192,6 +236,7 @@ fn cli_debug(args: &[String]) {
             let mut env_domain = "editor-pd.spark.xd.com".to_string();
             let mut cred_label = None;
             let mut hold_secs = None;
+            let mut kind_str: Option<String> = None;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -202,11 +247,12 @@ fn cli_debug(args: &[String]) {
                     "--env" => { env_domain = args.get(i + 1).cloned().unwrap_or(env_domain); i += 2; }
                     "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
                     "--hold" => { hold_secs = args.get(i + 1).cloned(); i += 2; }
+                    "--kind" => { kind_str = args.get(i + 1).cloned(); i += 2; }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }
             let (Some(project), Some(user)) = (project, user) else {
-                eprintln!("用法: debug start --project <路径> --user <userid> [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>]");
+                eprintln!("用法: debug start --project <路径> --user <userid> [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--kind editor-<api>|tester_test|tester_prod]");
                 return;
             };
             let userid: i64 = match user.parse() {
@@ -235,6 +281,7 @@ fn cli_debug(args: &[String]) {
                 cred: cred.info.clone(),
                 userid,
                 env_domain,
+                runtime_kind: kind_str.map(|s| core::runtimes::parse(&s, 13)),
             };
             match core::debug::DebugSession::start(&params) {
                 Ok(mut session) => {
@@ -341,6 +388,7 @@ fn cli_payload(args: &[String]) {
             let mut runtime = None;
             let mut api = 13u32;
             let mut dry_run = false;
+            let mut kind_str: Option<String> = None;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -348,6 +396,7 @@ fn cli_payload(args: &[String]) {
                     "--runtime" => { runtime = args.get(i + 1).cloned(); i += 2; }
                     "--api" => { api = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(api); i += 2; }
                     "--dry-run" => { dry_run = true; i += 1; }
+                    "--kind" => { kind_str = args.get(i + 1).cloned(); i += 2; }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }
@@ -374,6 +423,7 @@ fn cli_payload(args: &[String]) {
                 project_libs,
                 project_root: project.map(PathBuf::from),
                 dry_run,
+                runtime_kind: kind_str.map(|s| core::runtimes::parse(&s, api)),
             };
             let mut log = |msg: String| println!("{msg}");
             match core::payload::sync(&params, &mut log) {
@@ -381,7 +431,7 @@ fn cli_payload(args: &[String]) {
                 Err(e) => eprintln!("载荷同步失败: {e}"),
             }
         }
-        _ => eprintln!("payload 子命令: sync [--project <路径>] [--runtime <载荷目录>] [--api <版本>] [--dry-run]"),
+        _ => eprintln!("payload 子命令: sync [--project <路径>] [--runtime <载荷目录>] [--api <版本>] [--kind editor-<api>|tester_test|tester_prod] [--dry-run]"),
     }
 }
 
@@ -396,6 +446,8 @@ struct App {
     cred_store: core::auth::CredentialStore,
     cred_new_label: String,
     verify_result: String,
+    verify_rx: Option<std::sync::mpsc::Receiver<(String, Result<String, String>)>>,
+    refresh_rx: Option<std::sync::mpsc::Receiver<(String, Result<(i64, Option<String>), String>)>>,
     // 自登录
     login_qr: Option<egui::TextureHandle>,
     login_state: Option<core::login::LoginState>,
@@ -408,6 +460,10 @@ struct App {
     debug_userid_input: String,
     debug_runtime_input: String,
     debug_start_rx: Option<std::sync::mpsc::Receiver<ui::debug::StartOutcome>>,
+    /// 运行时选择（0=编辑器-api（默认） 1=对战平台测试 2=对战平台正式）
+    debug_kind_sel: usize,
+    /// 启动前自动 payload sync 的进度
+    debug_progress_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
 
 impl Default for App {
@@ -420,6 +476,8 @@ impl Default for App {
             cred_store: core::auth::CredentialStore::load(),
             cred_new_label: String::new(),
             verify_result: String::new(),
+            verify_rx: None,
+            refresh_rx: None,
             login_qr: None,
             login_state: None,
             login_grant: None,
@@ -430,6 +488,8 @@ impl Default for App {
             debug_userid_input: String::new(),
             debug_runtime_input: String::new(),
             debug_start_rx: None,
+            debug_kind_sel: 0,
+            debug_progress_rx: None,
         }
     }
 }

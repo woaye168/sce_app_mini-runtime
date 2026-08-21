@@ -45,6 +45,16 @@ POST https://updater-pd.tapsce.cn/api/map/update-info?<参数全在 query string
 - **凡 `_m` 落位的包都要登记**（含依赖自动展开项 global_default/spark_core/lib_ui）——否则引擎回退 `Res/maps/<lib>` 报 `cannot find package`（0.2.0 实测）。
 - 官方注册表 `D:\sce_online\update\editor-pd.spark.xd.com\api_pak_version.json` 可作权威对照。
 
+### 4.1 ★ 依赖库版本号 = 注册表权威（2026-08-21 用户指正 + 源码实证）
+
+**依赖库（libs.json 的键）的版本号必须读 api_pak_version.json[\<api\>] 表**，不能直接用 update-info 返回的 version（那是该库的最新版，不一定是当前 api 适用的版本）。编辑器就是这么做的：
+
+- `client_base update/core/local_version.lua` + `local_api_pak_version.lua`：编辑器更新时把下载的包按 `api_pak_version_manager:set(editor_api_version, 包名, 版本)` 写入注册表（StateEditor 模式，`same_api_version` 标记的入当前 api 表）。
+- 游戏侧消费：`<api>` 表的 `{包名: 版本}` 经 `#package_path` 映射到 `Res/_m/...` 路径。
+- **依赖库下载落位**（编辑器实测）：`update/<env>/res/_m/maps/`、`_m/maps/script_libs/`、`_m/maps/user_libs/` 三类——包是 7z，解压到这 3 个目录供编辑器消费。
+
+**对 mini-runtime**：`resolve_libs` 选依赖库版本时，先读载荷注册表 `api_pak_version.json[<api>][<库名>]`；注册表缺失才回退 update-info 返回值/载荷目录最大版本。下载依赖库时按 `update-info` 的 path 字段（`Res/maps[/script_libs|/user_libs|/ai_templates]`）落 `_m/maps[/...]`。
+
 ## 5. 包清单（payload.rs 的常量）
 
 - **基础包 BASE_PACKAGES**：client_base / startup / fonts / engineres / uistyle / refconfig / shadercache_windows_ui
