@@ -1,16 +1,5 @@
-# Frida 抓取编辑器调试 launcher（version-13/SCE）的 ws2_32 收发字节
-# 用途：逆向 DebugManager 控制协议（EditorLogin/UploadDelta/EditorStartGame）的真实线上格式
-# 用法：python frida_capture.py <out.jsonl>
-import sys, json, time, frida
-
-SCE = r"D:\sce_online\version-13\SCE"
-ARGS = [
-    "-server=editor-pd.spark.xd.com", "-use_local_res", "-launcher=星火编辑器.exe",
-    "-editor_api_version=13", "-no_ask_editor_api_version", "-generate_and_debug_map",
-    r"-file_path=c:\Users\woaye\Documents\SCE Projects\test_res002\project.sce",
-]
-
-JS = r"""
+// ws2_32 收发 hook（frida_capture.rs 的注入脚本）
+// 输出：send({ t: 'io', rec: {...} })，rec 逐行写入 jsonl
 let hooked = false;
 function hex(buf, len) {
     if (len <= 0) return "";
@@ -87,32 +76,3 @@ function installHooks() {
     });
 }
 installHooks();
-"""
-
-def main():
-    out_path = sys.argv[1]
-    device = frida.get_local_device()
-    pid = device.spawn([SCE] + ARGS, cwd=r"D:\sce_online")
-    print(f"spawned pid {pid}")
-    session = device.attach(pid)
-    script = session.create_script(JS)
-    n = [0]
-    with open(out_path, 'a', encoding='utf-8') as f:
-        def on_message(msg, data):
-            if msg.get('type') == 'send':
-                rec = msg['payload']['rec']
-                n[0] += 1
-                f.write(json.dumps(rec, ensure_ascii=False) + '\n')
-                f.flush()
-                print(f"[{n[0]}] {rec['op']} {rec.get('addr','')} len={rec.get('len','')}", flush=True)
-            else:
-                print("MSG:", msg, flush=True)
-        script.on('message', on_message)
-        script.load()
-        device.resume(pid)
-        print("resumed, capturing 240s...", flush=True)
-        time.sleep(240)
-    print("done")
-
-if __name__ == '__main__':
-    main()

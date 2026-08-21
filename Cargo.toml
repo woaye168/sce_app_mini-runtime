@@ -25,6 +25,15 @@ windows-capture = "1"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }
 
+# 研究工具（examples/*.rs）专用依赖，不进主程序
+[dev-dependencies]
+base64 = "0.22"
+prost = "0.13"
+prost-types = "0.13"
+capstone = "0.12"
+bcdec_rs = "0.2"
+frida = { version = "0.17", features = ["auto-download"] }
+
 [profile.release]
 opt-level = 2
 strip = true

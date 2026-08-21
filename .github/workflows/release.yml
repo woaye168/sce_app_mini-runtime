@@ -39,6 +39,17 @@ jobs:
           $meta | Add-Member -NotePropertyName release_notes -NotePropertyValue (Get-Content release_notes.md -Raw -Encoding utf8)
           $meta | ConvertTo-Json -Depth 5 | Set-Content app-release.json -Encoding utf8
 
+      # base_assets.7z 不入 git（19MB 二进制）：从前一 release 继承；首版或内容更新时
+      # 由维护者本地 examples/pack_base_assets.ps1 重打后 gh release upload --clobber
+      - name: Carry forward base_assets.7z from previous release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download --repo ${{ github.repository }} --pattern base_assets.7z --dir . 2>$null
+          if (Test-Path base_assets.7z) { Write-Host "已从前一 release 继承 base_assets.7z" }
+          else { Write-Host "::warning::无历史 base_assets.7z，本 release 将不附带基座资产包（payload sync 下载通道不可用，仅本机编辑器兜底）" }
+
       - name: Upload Release
         uses: softprops/action-gh-release@v2
         env:
@@ -49,3 +60,12 @@ jobs:
           files: |
             target/release/sce_app_mini-runtime.exe
             app-release.json
+
+      - name: Upload base_assets.7z
+        if: hashFiles('base_assets.7z') != ''
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: base_assets.7z
