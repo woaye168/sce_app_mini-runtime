@@ -203,18 +203,7 @@ fn sync_base_assets(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<
     }
 
     // ② 自分发下载
-    let url = std::env::var("MINI_RUNTIME_BASE_ASSETS_URL").unwrap_or_else(|_| {
-        "https://github.com/woaye168/sce_app_mini-runtime/releases/latest/download/base_assets.7z"
-            .to_string()
-    });
-    log(format!("下载基座资产: {url}"));
-    let client = http_client()?;
-    let bytes = client
-        .get(&url)
-        .send()
-        .map_err(|e| anyhow!("基座资产下载失败: {e}"))?
-        .bytes()
-        .map_err(|e| anyhow!("基座资产读取失败: {e}"))?;
+    let bytes = download_base_assets(log)?;
     let tmp = std::env::temp_dir().join(format!("mr_base_{}.7z", std::process::id()));
     std::fs::write(&tmp, &bytes)?;
     let tmp_x = std::env::temp_dir().join(format!("mr_base_{}_x", std::process::id()));
@@ -241,6 +230,85 @@ fn sync_base_assets(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<
     let _ = std::fs::remove_dir_all(&tmp_x);
     log("基座资产落位完成".into());
     Ok(())
+}
+
+/// 下载 base_assets.7z。
+/// env MINI_RUNTIME_BASE_ASSETS_URL 覆盖 = 公开直链直下；
+/// 默认走 GitHub API（仓库私有，asset 直链匿名 404——必须 API 定位 asset + octet-stream + token，
+/// 同 bgd_sce_tools net.rs 方案）。token 来源：env MINI_RUNTIME_GITHUB_TOKEN →
+/// Windows 凭据管理器 `bgd_sce_tools/github_token`（宿主应用设置里配置的 fine-grained PAT，共用）。
+fn download_base_assets(log: &mut dyn FnMut(String)) -> Result<Vec<u8>> {
+    let client = http_client()?;
+    if let Ok(url) = std::env::var("MINI_RUNTIME_BASE_ASSETS_URL") {
+        log(format!("下载基座资产（自定义 URL）: {url}"));
+        return Ok(client
+            .get(&url)
+            .send()
+            .map_err(|e| anyhow!("基座资产下载失败: {e}"))?
+            .bytes()
+            .map_err(|e| anyhow!("基座资产读取失败: {e}"))?
+            .to_vec());
+    }
+    let token = std::env::var("MINI_RUNTIME_GITHUB_TOKEN")
+        .ok()
+        .filter(|t| !t.is_empty())
+        .or_else(|| {
+            keyring::Entry::new("bgd_sce_tools", "github_token")
+                .ok()?
+                .get_password()
+                .ok()
+        })
+        .ok_or_else(|| {
+            anyhow!(
+                "基座资产在私有仓库 release 上，需要 GitHub token：设环境变量 MINI_RUNTIME_GITHUB_TOKEN，\
+                 或在宿主 bgd_sce_tools 设置里配置 github_token（本应用共用同一凭据）"
+            )
+        })?;
+    log("经 GitHub API 定位基座资产（私有仓库）".into());
+    let resp = client
+        .get("https://api.github.com/repos/woaye168/sce_app_mini-runtime/releases/latest")
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "sce_app_mini-runtime")
+        .send()
+        .map_err(|e| anyhow!("查询最新 release 失败: {e}"))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(anyhow!(
+            "查询最新 release 失败: {status} {:.120}（私有仓库 404 多为 token 未覆盖 sce_app_mini-runtime，请在 GitHub 给 PAT 补仓库授权）",
+            body
+        ));
+    }
+    let rel: Value = resp
+        .json()
+        .map_err(|e| anyhow!("release 响应解析失败: {e}"))?;
+    let asset_url = rel
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .and_then(|a| {
+            a.iter()
+                .find(|x| x.get("name").and_then(|n| n.as_str()) == Some("base_assets.7z"))
+        })
+        .and_then(|x| x.get("url"))
+        .and_then(|u| u.as_str())
+        .map(String::from)
+        .ok_or_else(|| anyhow!("最新 release 里没有 base_assets.7z"))?;
+    log("下载基座资产: base_assets.7z".into());
+    let resp = client
+        .get(&asset_url)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Accept", "application/octet-stream")
+        .header("User-Agent", "sce_app_mini-runtime")
+        .send()
+        .map_err(|e| anyhow!("基座资产下载失败: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("基座资产下载失败: {}", resp.status()));
+    }
+    let bytes = resp
+        .bytes()
+        .map_err(|e| anyhow!("基座资产读取失败: {e}"))?;
+    Ok(bytes.to_vec())
 }
 
 /// 从项目 script/tsconfig.json 的 typeRoots 推导编辑器 update/Res 目录
@@ -402,6 +470,7 @@ fn extract_and_place(bytes: &[u8], dest_dir: &Path) -> Result<()> {
 }
 
 fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let s = entry.path();

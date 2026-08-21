@@ -39,7 +39,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 
 - **控制协议**（详见 doc/research/scegame-reverse.md §8）：TCP 直连 debug host；帧 = u32 LE 总长 + 0x00 + envelope；0xF000 段消息。大文件上传 = **0xF004 空声明（无 f3）→ 0xF008 分块（101400B）→ 0xF00A**；上传路径**全小写**（host 是 Linux 大小写敏感）。
 - **载荷 0 依赖**：`payload sync` 走官方 `update-info`（query-string POST 空 body 免签名）+ OSS 公共读下载；每次 sync 实时查询 = 自动跟随星火服务器侧版本更新；部分包 TNND 加密（XOR CREATEEASY）需识别解密；`_m` 注册表包需 UPAK 解散文件 + 合成 api_pak_version.json（items 全量登记）。
-- **基座资产**（update-info 不分发：ui/font/regular 字体族、fonts、characters、effect）：本机编辑器兜底复制（tsconfig 推导）→ 否则下载 GitHub release 的 base_assets.7z。重新打包：`examples/pack_base_assets.ps1` 后 `gh release upload <tag> --clobber`。
+- **基座资产**（update-info 不分发：ui/font/regular 字体族、fonts、characters、effect）：本机编辑器兜底复制（tsconfig 推导）→ 否则下载本仓库 release 的 base_assets.7z（**仓库私有，走 GitHub API + token**：env `MINI_RUNTIME_GITHUB_TOKEN` → 凭据管理器 `bgd_sce_tools/github_token`；env `MINI_RUNTIME_BASE_ASSETS_URL` 可覆盖为公开直链）。重新打包：`examples/pack_base_assets.ps1` 后 `gh release upload <tag> --clobber`。
 - **spawn 防卡死**：游戏进程必须用裸 `CreateProcessW(bInheritHandles=FALSE)` 拉起——std Command 会让游戏继承调用方管道句柄，导致管道对端工具等 EOF 卡死到游戏关窗。
 - **B 模式永远带 `-no_update`**：否则 scegame 会自更新并清掉组装好的载荷。
 
