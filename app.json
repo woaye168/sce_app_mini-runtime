@@ -1,7 +1,7 @@
 {
   "id": "mini-runtime",
   "name": "脱机运行时",
-  "description": "脱机运行时",
+  "description": "提供最小化运行时, 支持在脱机环境下调试发版。",
   "author": "BGD",
   "asset_name": "sce_app_mini-runtime.exe"
 }
