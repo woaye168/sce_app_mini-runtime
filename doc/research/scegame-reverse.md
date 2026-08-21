@@ -370,6 +370,9 @@ debug start --project test_res002 --user 38672742 --runtime runtime/
 
 ## 12. ★ 载荷 0 依赖下载通道（2026-08-21 打通并全链验证）
 
+> **载荷体系细节已抽出到 [payload-packages.md](payload-packages.md)**（update-info 契约/包格式/落位/注册表/基座资产/版本跟随），本节保留关键结论。
+> **⚠️ 引擎归属修正（2026-08-21 补）**：本节说的 `win` 包经 MD5 实证 = **对战平台引擎**（与 tester 的 scegame 一致），不是编辑器引擎（version-\<api\>/sceengine.dll）。B 模式客户端用它可行（登录/跑游戏能力一致），但研究编辑器 native 行为时注意区分两套运行时——详见 [runtimes.md](runtimes.md)。
+
 **官方自更新通道逆向结论**（tester/编辑器共用）：
 
 1. **版本发现 = update-info**：`POST https://updater-pd.tapsce.cn/api/map/update-info?<参数全在 query string>`，**空 body、免签名**（body 放参数会 500！list 用 `;` 分隔）。响应行 3 = JSON：`items[] = {name, version, url, md5, size, original_size, path, variation, api_version}`，依赖自动展开（查项目库会带出 global_default/spark_core/lib_ui 等）。
