@@ -83,12 +83,14 @@ _G.IP（编辑器 = editor-pd.spark.xd.com）
   production → pd
   pd/master 在 need_use_new_domain → spark.xd.com → tapsce.cn
   命中映射 → https
-结果：publisher = https://publisher-pd.tapsce.cn:9000
-      updater   = https://updater-pd.tapsce.cn:9002
-      login     = https://login-pd.tapsce.cn:9011
-      assign_host = http://<_G.IP>:9007/api/v1/assign_host（game host 分配）
-argv server / http 可覆盖 _G.IP / http 基址
+结果（⚠️ 2026-08-21 实测修正）：
+  publisher/updater/login = https://<服务>-pd.tapsce.cn（443，不带端口）
+  assign_host = http://<_G.IP>:9007/api/v1/assign_host（game host 分配）
 ```
+
+**端口实测（2026-08-21，本机）：** `publisher-pd.tapsce.cn` 的 **443 通**（POST /api/map/api-version 返回 200 真实数据），**9000/9002/9011 全超时**——calc_http_server_address 的 default_port 是旧域名（spark.xd.com 时代）的遗留，tapsce.cn 新域名统一走 443。lua 源码里的 `:9000/:9002` 拼接按源码读会错，以实测为准。
+**签名验证实测通过**：本仓 CLI `auth verify` 用凭证文件的 login_token/secret 按 §1.5 公式签名调 api-version 返回 200——**凭证在编辑器外可直接用**（0.1.0 验收 2 已达成）。
+argv server / http 可覆盖 _G.IP / http 基址。
 
 ## 4. 脱机调试事实（editor-runtime-mechanism.md §4 摘要 + 本仓补充）
 

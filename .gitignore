@@ -18,6 +18,17 @@ desktop.ini
 # Logs
 *.log
 
+# 运行时载荷（官方二进制+包，几百 MB，不入库；由 examples/assemble_runtime.ps1 从本机官方目录组装或首启下载）
+/runtime/
+
+# 凭证库与登录二维码（敏感，不入库）
+/*.credentials.json
+/login_qrcode.png
+
+# 基础资源包（19MB 二进制，不入库；由 examples/pack_base_assets.ps1 生成，
+# 手动挂到 GitHub Release，后续版本由 CI 从前一 release 继承）
+/examples/base_assets.7z
+
 # Local environment overrides
 .env
 .env.local
