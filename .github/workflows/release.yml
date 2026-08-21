@@ -49,6 +49,7 @@ jobs:
           gh release download --repo ${{ github.repository }} --pattern base_assets.7z --dir . 2>$null
           if (Test-Path base_assets.7z) { Write-Host "已从前一 release 继承 base_assets.7z" }
           else { Write-Host "::warning::无历史 base_assets.7z，本 release 将不附带基座资产包（payload sync 下载通道不可用，仅本机编辑器兜底）" }
+          exit 0
 
       - name: Upload Release
         uses: softprops/action-gh-release@v2
