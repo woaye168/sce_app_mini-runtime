@@ -32,15 +32,24 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.label("导入为：");
                         ui.text_edit_singleline(&mut self.cred_new_label);
-                        if ui.button("导入编辑器凭证").clicked() && !self.cred_new_label.is_empty() {
+                        if ui.button("导入编辑器凭证").clicked() {
+                            // 名称为空时给默认名，重名自动加序号（之前空名点了没反应，无任何提示）
+                            let base = if self.cred_new_label.trim().is_empty() {
+                                "编辑器凭证".to_string()
+                            } else {
+                                self.cred_new_label.trim().to_string()
+                            };
+                            let mut label = base.clone();
+                            let mut n = 2;
+                            while self.cred_store.items.contains_key(&label) {
+                                label = format!("{base}-{n}");
+                                n += 1;
+                            }
                             // 只读复制一份进凭证库，不写回——编辑器原凭证不动，不会踢下线
-                            self.cred_store.harvest(
-                                &self.cred_new_label.clone(),
-                                &locate.env_domain,
-                                info,
-                            );
+                            self.cred_store
+                                .harvest(&label, &locate.env_domain, info);
                             let _ = self.cred_store.save();
-                            self.status = format!("已导入凭证：{}（编辑器原凭证未动）", self.cred_new_label);
+                            self.status = format!("已导入凭证：{label}（编辑器原凭证未动）");
                             self.cred_new_label.clear();
                         }
                     });
@@ -112,15 +121,18 @@ impl App {
                                     .unwrap_or_else(|_| "login_qrcode.png".into());
                                 let _ = std::fs::write(&qr_path, &png);
                                 self.status = format!("二维码已保存：{}", qr_path.display());
-                                let img = egui::ColorImage::from_rgba_unmultiplied(
-                                    [200, 200],
-                                    &rgba_of(&png),
-                                );
-                                self.login_qr = Some(ui.ctx().load_texture(
-                                    "login_qr",
-                                    img,
-                                    egui::TextureOptions::LINEAR,
-                                ));
+                                // 注意：min_dimensions 是最小尺寸，实际渲染可能 >200，
+                                // 尺寸必须与像素缓冲一致，硬编码 200x200 会 assert 崩溃
+                                match color_image_of(&png) {
+                                    Some(img) => {
+                                        self.login_qr = Some(ui.ctx().load_texture(
+                                            "login_qr",
+                                            img,
+                                            egui::TextureOptions::LINEAR,
+                                        ));
+                                    }
+                                    None => self.status = "二维码解码失败".into(),
+                                }
                             }
                             Err(e) => self.status = format!("二维码生成失败：{e}"),
                         }
@@ -181,9 +193,10 @@ impl App {
     }
 }
 
-// 把 PNG 解码为 RGBA 字节（egui ColorImage 用）
-fn rgba_of(png: &[u8]) -> Vec<u8> {
-    image::load_from_memory_with_format(png, image::ImageFormat::Png)
-        .map(|i| i.to_rgba8().into_raw())
-        .unwrap_or_default()
+// 把 PNG 解码为 egui ColorImage（尺寸取图片真实宽高，防 assert 崩溃）
+fn color_image_of(png: &[u8]) -> Option<egui::ColorImage> {
+    let img = image::load_from_memory_with_format(png, image::ImageFormat::Png).ok()?;
+    let rgba = img.to_rgba8();
+    let (w, h) = (rgba.width() as usize, rgba.height() as usize);
+    Some(egui::ColorImage::from_rgba_unmultiplied([w, h], &rgba.into_raw()))
 }
