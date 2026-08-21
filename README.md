@@ -33,7 +33,7 @@ sce_app_mini-runtime auth refresh <凭证名> [--runtime <载荷目录>]
 
 sce_app_mini-runtime payload sync [--project <路径>] [--runtime <载荷目录>] [--api 13] [--kind editor-13|tester_test|tester_prod] [--dry-run]
 
-sce_app_mini-runtime debug start --project <路径> --user <userid> [--runtime <载荷目录>] [--cred <凭证名>] [--kind ...] [--hold <秒>]
+sce_app_mini-runtime debug start --project <路径> [--user <userid>] [--runtime <载荷目录>] [--cred <凭证名>] [--kind ...] [--hold <秒>]
 sce_app_mini-runtime debug stop [--staging <暂存目录> | --runtime <载荷目录> --project <路径>]
 
 sce_app_mini-runtime capture [--title <窗口标题子串>] [--out <输出.png>]

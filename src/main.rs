@@ -99,7 +99,7 @@ fn cli_auth(args: &[String]) {
                 return;
             };
             match core::verify::verify(&cred.info, &cred.env_domain) {
-                Ok(text) => println!("验证通过: {}", &text[..text.len().min(200)]),
+                Ok(text) => println!("验证通过: {}", text.chars().take(200).collect::<String>()),
                 Err(e) => eprintln!("验证失败: {e}"),
             }
         }
@@ -251,19 +251,10 @@ fn cli_debug(args: &[String]) {
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }
-            let (Some(project), Some(user)) = (project, user) else {
-                eprintln!("用法: debug start --project <路径> --user <userid> [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--kind editor-<api>|tester_test|tester_prod]");
+            let Some(project) = project else {
+                eprintln!("用法: debug start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--kind editor-<api>|tester_test|tester_prod]");
                 return;
             };
-            let userid: i64 = match user.parse() {
-                Ok(v) => v,
-                Err(_) => { eprintln!("--user 必须是数字 userid"); return; }
-            };
-            let runtime_dir = runtime.map(PathBuf::from).unwrap_or_else(|| {
-                std::env::current_exe()
-                    .map(|e| e.with_file_name("runtime"))
-                    .unwrap_or_else(|_| PathBuf::from("runtime"))
-            });
             let store = core::auth::CredentialStore::load();
             let label = cred_label.or(store.active_label.clone());
             let Some(label) = label else {
@@ -274,6 +265,25 @@ fn cli_debug(args: &[String]) {
                 eprintln!("凭证不存在: {label}");
                 return;
             };
+            // --user 缺省时取凭证登录态（auth refresh 抓回的 userid）
+            let userid: i64 = match user.as_deref().map(str::trim) {
+                Some(s) if !s.is_empty() => match s.parse() {
+                    Ok(v) => v,
+                    Err(_) => { eprintln!("--user 必须是数字 userid"); return; }
+                },
+                _ => match cred.info.userid {
+                    Some(v) => v,
+                    None => {
+                        eprintln!("未指定 --user 且凭证 {label} 无登录态（先 auth refresh {label}）");
+                        return;
+                    }
+                },
+            };
+            let runtime_dir = runtime.map(PathBuf::from).unwrap_or_else(|| {
+                std::env::current_exe()
+                    .map(|e| e.with_file_name("runtime"))
+                    .unwrap_or_else(|_| PathBuf::from("runtime"))
+            });
             let params = core::debug::DebugParams {
                 project_root: PathBuf::from(&project),
                 runtime_dir,
@@ -347,7 +357,7 @@ fn cli_debug(args: &[String]) {
             }
         }
         _ => {
-            eprintln!("debug 子命令: start --project <路径> --user <userid> [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] | stop [--staging <暂存目录> | --runtime <载荷目录> --project <路径>]");
+            eprintln!("debug 子命令: start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] | stop [--staging <暂存目录> | --runtime <载荷目录> --project <路径>]");
         }
     }
 }

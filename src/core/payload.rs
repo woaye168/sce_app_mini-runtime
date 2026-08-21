@@ -8,7 +8,6 @@ use anyhow::{anyhow, Result};
 use md5::Digest;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 /// 基础包（非注册表版本管理，落 Res/<name>/<name>.pak）
 const BASE_PACKAGES: &[&str] = &[
@@ -86,7 +85,7 @@ pub fn update_info_var(names: &[String], api_version: u32, variation: &str) -> R
     let json_line = text
         .lines()
         .find(|l| l.trim_start().starts_with('{'))
-        .ok_or_else(|| anyhow!("update-info 响应格式异常: {}", &text[..text.len().min(200)]))?;
+        .ok_or_else(|| anyhow!("update-info 响应格式异常: {}", text.chars().take(200).collect::<String>()))?;
     let v: Value = serde_json::from_str(json_line)?;
     let items = v
         .get("items")
@@ -147,6 +146,25 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
     log(format!("在线版本解析到 {} 个包", items.len()));
 
     let mut registry: Vec<(String, u64)> = Vec::new(); // (name, version) 已落位
+    // 预统计待下载包数（进度「第 i/N 个包」用；判重逻辑与主循环一致）
+    let pending_total = items
+        .iter()
+        .filter(|item| {
+            if item.url.is_empty() {
+                return false;
+            }
+            let Some((dest_dir, _)) = place_target(params, item) else {
+                return false;
+            };
+            let already = if item.name == ENGINE_PACKAGE || item.name == "wineditor" {
+                kind.engine_ready(&params.runtime_dir)
+            } else {
+                dest_dir.exists()
+            };
+            !already
+        })
+        .count();
+    let mut dl_idx = 0usize;
     for item in &items {
         if item.url.is_empty() {
             continue;
@@ -158,7 +176,6 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
         }
         let (dest_dir, dest_note) = target.unwrap();
         // 引擎包以 spawn 目标存在与否判重（win→scegame.exe；wineditor→version-<api>/SCE）；包以落位目录判重
-        let kind = params.kind();
         let already = if item.name == ENGINE_PACKAGE || item.name == "wineditor" {
             kind.engine_ready(&params.runtime_dir)
         } else {
@@ -169,16 +186,17 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
             registry.push((item.name.clone(), item.version));
             continue;
         }
-        log(format!(
-            "下载 {} v{}（{:.1}MB）...",
-            item.name,
-            item.version,
-            item.size as f64 / 1048576.0
-        ));
         if params.dry_run {
+            log(format!(
+                "下载 {} v{}（{:.1}MB）...（dry-run）",
+                item.name,
+                item.version,
+                item.size as f64 / 1048576.0
+            ));
             continue;
         }
-        let bytes = download(item)?;
+        dl_idx += 1;
+        let bytes = download(item, dl_idx, pending_total, log)?;
         extract_and_place(&bytes, &dest_dir)?;
         // _m 包： pak 之外再解出散文件（引擎对 _m/maps 库与 _m/script 等按散文件探测优先）
         if REGISTRY_PACKAGES.contains(&item.name.as_str()) || item.path.starts_with("Res/maps") {
@@ -248,7 +266,7 @@ fn sync_base_assets(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<
     let tmp_x = std::env::temp_dir().join(format!("mr_base_{}_x", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp_x);
     std::fs::create_dir_all(&tmp_x)?;
-    let status = Command::new("tar")
+    let status = crate::core::silent_command("tar")
         .args(["-xf"])
         .arg(&tmp)
         .arg("-C")
@@ -452,23 +470,57 @@ fn registry_m_subpath(name: &str) -> String {
     }
 }
 
-/// 下载 + md5 校验
-fn download(item: &UpdateItem) -> Result<Vec<u8>> {
+/// 下载 + md5 校验（流式读取，周期性回报进度：已下MB/总MB + 第 i/N 个包）
+fn download(item: &UpdateItem, idx: usize, total: usize, log: &mut dyn FnMut(String)) -> Result<Vec<u8>> {
+    use std::io::Read;
     let url = format!("https://{}", item.url);
     let client = http_client()?;
-    let bytes = client
+    let mut resp = client
         .get(&url)
         .send()
-        .map_err(|e| anyhow!("下载失败 {}: {e}", item.name))?
-        .bytes()
-        .map_err(|e| anyhow!("读取失败 {}: {e}", item.name))?;
+        .map_err(|e| anyhow!("下载失败 {}: {e}", item.name))?;
+    let total_bytes = resp.content_length().unwrap_or(item.size);
+    let mut buf: Vec<u8> = Vec::with_capacity(total_bytes as usize);
+    let mut chunk = [0u8; 256 * 1024];
+    // 首条进度立即打（让用户马上看到「第 i/N 个包」），之后每 ~800ms 刷一次
+    let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1);
+    loop {
+        let n = resp
+            .read(&mut chunk)
+            .map_err(|e| anyhow!("读取失败 {}: {e}", item.name))?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if last.elapsed().as_millis() >= 800 {
+            log(format!(
+                "下载 {} v{}（{:.1}MB/{:.1}MB），正在下载 第 {}/{} 个包",
+                item.name,
+                item.version,
+                buf.len() as f64 / 1048576.0,
+                total_bytes as f64 / 1048576.0,
+                idx,
+                total
+            ));
+            last = std::time::Instant::now();
+        }
+    }
+    log(format!(
+        "下载 {} v{}（{:.1}MB/{:.1}MB）完成，第 {}/{} 个包",
+        item.name,
+        item.version,
+        buf.len() as f64 / 1048576.0,
+        total_bytes as f64 / 1048576.0,
+        idx,
+        total
+    ));
     if !item.md5.is_empty() {
-        let got = format!("{:x}", md5::Md5::digest(&bytes));
+        let got = format!("{:x}", md5::Md5::digest(&buf));
         if got != item.md5.to_lowercase() {
             return Err(anyhow!("md5 校验失败 {}: 期望 {} 实得 {}", item.name, item.md5, got));
         }
     }
-    Ok(bytes.to_vec())
+    Ok(buf)
 }
 
 /// 解 7z 到目标目录（系统 tar.exe；包内容 = 单个 <Name>.pak 或 Win 根文件集）
@@ -491,7 +543,7 @@ fn extract_and_place(bytes: &[u8], dest_dir: &Path) -> Result<()> {
     let tmp_extract = std::env::temp_dir().join(format!("mr_pak_{}_x", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp_extract);
     std::fs::create_dir_all(&tmp_extract)?;
-    let status = Command::new("tar")
+    let status = crate::core::silent_command("tar")
         .args(["-xf"])
         .arg(&tmp)
         .arg("-C")

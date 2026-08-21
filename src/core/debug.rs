@@ -252,7 +252,7 @@ impl DebugSession {
         if !exe.is_file() {
             return Err(anyhow!(
                 "游戏客户端不存在: {}（运行时 {} 未就绪，先 payload sync）",
-                exe.display(),
+                crate::core::disp(&exe),
                 kind.display_name()
             ));
         }
@@ -301,7 +301,7 @@ impl DebugSession {
         let pid_file = staging_dir.with_extension("pid");
         let pid = std::fs::read_to_string(&pid_file)
             .map_err(|e| anyhow!("读 pidfile 失败 {}: {e}", pid_file.display()))?;
-        let _ = Command::new("taskkill")
+        let _ = crate::core::silent_command("taskkill")
             .args(["/PID", pid.trim(), "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -328,7 +328,7 @@ impl DebugSession {
     /// 停止：杀客户端进程树 + 断控制连接
     pub fn stop(&mut self) {
         let pid = self.pid.to_string();
-        let _ = Command::new("taskkill")
+        let _ = crate::core::silent_command("taskkill")
             .args(["/PID", &pid, "/T", "/F"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

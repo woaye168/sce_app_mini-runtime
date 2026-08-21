@@ -146,7 +146,7 @@ fn parse_userid_from_log(text: &str, marker: &str) -> Option<LoginIdentity> {
 }
 
 fn kill_pid(pid: u32) -> Result<()> {
-    let _ = std::process::Command::new("taskkill")
+    let _ = crate::core::silent_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())

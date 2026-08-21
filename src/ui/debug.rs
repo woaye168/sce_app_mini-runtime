@@ -17,7 +17,7 @@ impl App {
             ui.label("请先在宿主中打开项目");
             return;
         };
-        ui.label(format!("项目：{}", project.display()));
+        ui.label(format!("项目：{}", crate::core::disp(&project)));
 
         // 凭证
         let active = self.cred_store.active_label.clone();
@@ -51,7 +51,7 @@ impl App {
         // 参数区
         if self.debug_runtime_input.is_empty() {
             self.debug_runtime_input = std::env::current_exe()
-                .map(|e| e.with_file_name("runtime").display().to_string())
+                .map(|e| crate::core::disp(&e.with_file_name("runtime")))
                 .unwrap_or_default();
         }
         ui.horizontal(|ui| {
@@ -122,6 +122,11 @@ impl App {
                         self.status = format!("凭证不存在: {label}");
                         return;
                     };
+                    // 前置校验：缺 HTTP 签名对时 assign_host 必失败，提前给明确引导
+                    if !cred.info.can_sign() {
+                        self.status = "凭证缺 login_token/secret——请到「凭证」页重新「导入编辑器凭证」覆盖，或点击换一个凭证".into();
+                        return;
+                    }
                     // userid：输入框优先，空则取凭证登录态
                     let userid: i64 = match self.debug_userid_input.trim().parse() {
                         Ok(v) => v,

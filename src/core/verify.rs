@@ -8,7 +8,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 /// 生成签名 header（noise/time_str/token/sign）
 pub fn sign_headers(info: &UserInfo) -> Result<[(String, String); 4]> {
     if !info.can_sign() {
-        return Err(anyhow!("凭证缺 login_token/secret"));
+        return Err(anyhow!(
+            "凭证缺 login_token/secret（该凭证是在编辑器未完整登录时收割的）——请到「凭证」页重新「导入编辑器凭证」覆盖，或换一个凭证"
+        ));
     }
     let noise = format!("{}", 1000000 + (rand_u32() % 9000000));
     let time_str = format!(
