@@ -2,7 +2,7 @@
 
 > 日期：2026-08-21
 > 证据：client_base-78 全量还原件（镜像在 `D:/sce_online/Res/maps/bgd_glzy/.editor_src_mirror/client_base-78/`，77 个 lua；统一逆向镜像目录，与 script-199/xdeditor-160/tester 系列并列）+ script-199/xdeditor-160 镜像（editor-patch 仓）+ sceengine.dll 字符串考古
-> 重点纠正：「真实登录逻辑在 client_base 的 base/account.lua」——script-199 的同名文件只是 `return require '@base.xxx'` 转发桩，本仓已用 restore_game.py 一键还原 client_base-78 全量（7z→解密→UPAK 解包）
+> 重点纠正：「真实登录逻辑在 client_base 的 base/account.lua」——script-199 的同名文件只是 `return require '@base.xxx'` 转发桩，本仓已用 restore_game.rs 一键还原 client_base-78 全量（7z→解密→UPAK 解包）
 
 ## 1. 登录体系全链路（client_base-78 精读结论）
 
@@ -102,8 +102,8 @@ argv server / http 可覆盖 _G.IP / http 基址。
 
 ## 5. 工具链（本仓 examples/）
 
-- `restore_game.py`（从 editor-patch 仓搬运）：SCE 包一键还原——TNND 解密 → 7z 解压（py7zr/7z/tar 三路回退）→ UPAK 解包（含每条目 4 字节尾校验的 SCE 变体）→ 伪 KTX 图片就地解码 PNG（BC7/DXT1/DXT5/RGBA8/RGB8，Pillow+texture2ddecoder）。本仓 client_base-78 还原件即其产物。
-- 用法：`python restore_game.py <加密7z> -o <输出目录> [--keep-temp] [--no-decode-images]`。
+- `restore_game.rs`：SCE 包一键还原——TNND 解密 → 7z 解压（7z/7za/系统 tar 多路回退）→ UPAK 解包（含每条目 4 字节尾校验的 SCE 变体）→ 伪 KTX 图片就地解码 PNG（支持 BC7/BC1/BC2/BC3/RGBA8/RGB8，基于 `image` + `bcdec_rs`，相比旧 Python 版补齐了 BC2/DXT3 支持）。
+- 用法：`cargo run --example restore_game -- <加密7z> [-o 输出目录] [--keep-temp] [--no-decode-images]`
 
 ## 6. 研究镜像位置
 
