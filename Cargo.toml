@@ -35,6 +35,10 @@ prost-types = "0.13"
 capstone = "0.12"
 bcdec_rs = "0.2"
 frida = { version = "0.17", features = ["auto-download"] }
+# entrance_client 直连云变量（doc/research/lowlevel/cloudvar-04~06 协议）
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+futures-util = "0.3"
 
 [profile.release]
 opt-level = 2

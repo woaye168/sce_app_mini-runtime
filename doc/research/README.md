@@ -12,6 +12,8 @@
 | [scegame-reverse.md](scegame-reverse.md) | 逆向主文档：引擎子系统、控制协议（0xF000 段）、B 模式自托管、载荷 0 依赖下载通道 | 涉及调试 host 控制协议、staging、载荷下载时 |
 | [credential-userid.md](credential-userid.md) | **userid/user_name 的来源与获取**（凭证里没有、登录态才有、kid 是 opaque） | 涉及 userid 自动补全、凭证命名、多账号时 |
 | [payload-packages.md](payload-packages.md) | 载荷包体系：update-info 契约、包格式（7z/TNND/UPAK）、落位布局、版本注册表合成、基座资产 | 涉及 payload sync、包解包、版本跟随、字体/资源缺失时 |
+| [cloudvar-lowlevel.md](cloudvar-lowlevel.md) | **云变量底层全解**：sce.s/ScoreArchive 本质、Entrance 0xA000 协议解码、op 码/MessagePack 值编码/签名终表、权限模型、直连客户端与限流、2.0 云数据 API | 涉及云变量读写、entrance_client 直连、权限/限流问题、云数据能力调研时 |
+| [render-lowlevel.md](render-lowlevel.md) | **渲染底层全图**：各渲染通道能力矩阵与正确用法（imgui/UIScene/换模/附着/特效直路径）、数编注册链与脚本化、免数编攻坚判死记录（native 注册表逆向）、2.0 WasiCore 渲染面 | 涉及 UI/模型/特效/图集/webview/video 渲染、数编注册、动态资源加载时 |
 
 ## 研究方法论（贯穿所有文档）
 
@@ -30,4 +32,6 @@
 | `proto_extract` | protobuf descriptor 提取（结论：官方手写 wire 无 descriptor） |
 | `pe_imports` / `pe_exports` | PE 导入/导出表（定位 TLS/网络栈归属） |
 | `find_xref` / `disasm_at` | 字符串 xref / 反汇编（native 行为定位） |
+| `entrance_sniff` / `entrance_client` | Entrance 帧明文 dump / 云变量直连读写 CLI（见 cloudvar-lowlevel.md） |
+| `probes/`（RenderProbe/GameWorldProbe/CloudProbe 等） | 游戏内 lua 探针套件（见 render-lowlevel.md） |
 | `decode_kid` | 凭证 token 的 kid 段解码（结论：opaque 随机字节） |

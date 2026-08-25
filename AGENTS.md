@@ -55,6 +55,8 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 | 工具 | 用途 |
 | --- | --- |
 | `frida_capture` | Frida 抓 ws2_32 收发（注入脚本 ws_hook.js 内嵌）→ jsonl |
+| `entrance_sniff` | Entrance 协议帧明文 dump（hook 发送函数+接收日志点，云变量 0xA000 全双向；RVA 可用环境变量覆盖） |
+| `entrance_client` | Entrance 直连客户端：绕过引擎直读直写云变量（read/seti/sets/list；协议见 doc/research/lowlevel/cloudvar-04~06） |
 | `capture_parse` | jsonl 分析：`frames`（按消息逐帧 dump）/ `dump`（时间线递归 wire 解码）/ `blocks`（大文件分块序列） |
 | `restore_game` | 加密包一键还原：TNND → 7z → UPAK → 伪 KTX 图片转 PNG（BC1/2/3/7） |
 | `proto_extract` | 从 protobuf C++ 二进制提取内嵌 FileDescriptorProto |
