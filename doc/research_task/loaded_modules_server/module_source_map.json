@@ -1,0 +1,1817 @@
+[
+  {
+    "key": "@common",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\init.lua"
+  },
+  {
+    "key": "@common/base",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\init.lua"
+  },
+  {
+    "key": "@common/base/actor",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\actor.lua"
+  },
+  {
+    "key": "@common/base/ad",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\ad.lua"
+  },
+  {
+    "key": "@common/base/admin",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/ai",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/ai_searcher",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/anim_handlers",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\anim_handlers.lua"
+  },
+  {
+    "key": "@common/base/array",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\array.lua"
+  },
+  {
+    "key": "@common/base/auxiliary",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/behavior",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\behavior.lua"
+  },
+  {
+    "key": "@common/base/buff",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\buff.lua"
+  },
+  {
+    "key": "@common/base/channeler",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/cheat",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\cheat.lua"
+  },
+  {
+    "key": "@common/base/circle",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\circle.lua"
+  },
+  {
+    "key": "@common/base/class",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\class.lua"
+  },
+  {
+    "key": "@common/base/cmd_result",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\cmd_result.lua"
+  },
+  {
+    "key": "@common/base/co",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\co.lua"
+  },
+  {
+    "key": "@common/base/collision_flags",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\collision_flags.lua"
+  },
+  {
+    "key": "@common/base/crop",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/damage",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/datetime",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/deque",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\deque.lua"
+  },
+  {
+    "key": "@common/base/detection",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/eff",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\eff.lua"
+  },
+  {
+    "key": "@common/base/eff_param",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\eff_param.lua"
+  },
+  {
+    "key": "@common/base/effect",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/event",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\event.lua"
+  },
+  {
+    "key": "@common/base/event_deque",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\event_deque.lua"
+  },
+  {
+    "key": "@common/base/exception",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\exception.lua"
+  },
+  {
+    "key": "@common/base/fish",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/force",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\force.lua"
+  },
+  {
+    "key": "@common/base/force_movement",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/friend",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\friend.lua"
+  },
+  {
+    "key": "@common/base/game",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\game.lua"
+  },
+  {
+    "key": "@common/base/game/error_info",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/game",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/game_message",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/game_result",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/item",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/learn_skill",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/level_up",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/player",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/reborn",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/scene",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/select_hero",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/shop",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/template_buff",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/ui",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/game/unit",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/gameplay",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/group",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\group.lua"
+  },
+  {
+    "key": "@common/base/hashtable",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\hashtable.lua"
+  },
+  {
+    "key": "@common/base/heal",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/inventory",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/isolation",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/item",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\item.lua"
+  },
+  {
+    "key": "@common/base/json_decode",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/line",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\line.lua"
+  },
+  {
+    "key": "@common/base/lni",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/lni_writer",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\lni_writer.lua"
+  },
+  {
+    "key": "@common/base/load_done",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/log",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\log.lua"
+  },
+  {
+    "key": "@common/base/loot",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/loot_pool",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/lualib_bundle",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\lualib_bundle.lua"
+  },
+  {
+    "key": "@common/base/margin",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\margin.lua"
+  },
+  {
+    "key": "@common/base/match_info",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/math",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\math.lua"
+  },
+  {
+    "key": "@common/base/mover_line",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/mover_target",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/obj_check",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\obj_check.lua"
+  },
+  {
+    "key": "@common/base/old_junk",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/player",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\player.lua"
+  },
+  {
+    "key": "@common/base/point",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\point.lua"
+  },
+  {
+    "key": "@common/base/position",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\position.lua"
+  },
+  {
+    "key": "@common/base/promise",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\promise.lua"
+  },
+  {
+    "key": "@common/base/quest",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\quest.lua"
+  },
+  {
+    "key": "@common/base/rect",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\rect.lua"
+  },
+  {
+    "key": "@common/base/response",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\response.lua"
+  },
+  {
+    "key": "@common/base/room",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/rpc",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\rpc.lua"
+  },
+  {
+    "key": "@common/base/scene_object",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/scene_point",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\scene_point.lua"
+  },
+  {
+    "key": "@common/base/selector",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/shop",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/skill",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\skill.lua"
+  },
+  {
+    "key": "@common/base/snapshot",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\snapshot.lua"
+  },
+  {
+    "key": "@common/base/state_machine",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\state_machine.lua"
+  },
+  {
+    "key": "@common/base/table",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\table.lua"
+  },
+  {
+    "key": "@common/base/table_attr",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/target_filter",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\target_filter.lua"
+  },
+  {
+    "key": "@common/base/tds_score",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/team",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\team.lua"
+  },
+  {
+    "key": "@common/base/thirdordermatrix",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\thirdordermatrix.lua"
+  },
+  {
+    "key": "@common/base/timer",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\timer.lua"
+  },
+  {
+    "key": "@common/base/trigger",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\trigger.lua"
+  },
+  {
+    "key": "@common/base/trigger_editor_v2",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\trigger_editor_v2\\init.lua"
+  },
+  {
+    "key": "@common/base/trigger_editor_v2/array",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\trigger_editor_v2\\array.lua"
+  },
+  {
+    "key": "@common/base/try",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\try.lua"
+  },
+  {
+    "key": "@common/base/turn",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/unit",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\unit.lua"
+  },
+  {
+    "key": "@common/base/utility",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\utility.lua"
+  },
+  {
+    "key": "@common/base/validator",
+    "origin": "script 包（common 库）",
+    "source": null
+  },
+  {
+    "key": "@common/base/vector",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\vector.lua"
+  },
+  {
+    "key": "@common/base/voice",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\base\\voice.lua"
+  },
+  {
+    "key": "@common/preload/lni_loader",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\preload\\lni_loader.lua"
+  },
+  {
+    "key": "@common/preload/reload",
+    "origin": "script 包（common 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\script\\199\\common\\preload\\reload.lua"
+  },
+  {
+    "key": "@defaultui/actor",
+    "origin": "defaultui 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@defaultui/default_ui",
+    "origin": "defaultui 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@defaultui/default_ui/minimap_camera_control",
+    "origin": "defaultui 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\defaultui\\63\\ui\\script\\default_ui\\minimap_camera_control.lua"
+  },
+  {
+    "key": "@defaultui/default_ui/move_joystick",
+    "origin": "defaultui 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\defaultui\\63\\ui\\script\\default_ui\\move_joystick.lua"
+  },
+  {
+    "key": "@defaultui/main",
+    "origin": "defaultui 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\defaultui\\63\\src\\main.lua"
+  },
+  {
+    "key": "@defaultui/require_libs",
+    "origin": "defaultui 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\defaultui\\63\\ui\\script\\require_libs.lua"
+  },
+  {
+    "key": "@defaultui/trigger_module_main_1",
+    "origin": "defaultui 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\defaultui\\63\\ui\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@defaultui/trigger_validator",
+    "origin": "defaultui 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\defaultui\\63\\ui\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@global_default/lua_declare",
+    "origin": "global_default 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\global_default\\60\\ui\\script\\lua_declare.lua"
+  },
+  {
+    "key": "@lib_common_ai/ai/ai_common",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai/default_ai",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/default_ai",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/主动召唤物",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/仅移动ai",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/召唤物",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/攻城车",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/自定义ai",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/通用ai",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/野怪",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/ai_templates/镖车",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/behavior/enmity",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/init",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/new",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/state/attack",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/state/back",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/state/move",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/state/none",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/class/state/pursue",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/customscript",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_ai/main",
+    "origin": "lib_common_ai 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_common_ai\\43\\src\\main.lua"
+  },
+  {
+    "key": "@lib_common_ai/trigger_module_main_1",
+    "origin": "lib_common_ai 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_common_ai\\43\\ui\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@lib_common_ai/trigger_validator",
+    "origin": "lib_common_ai 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_common_ai\\43\\ui\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@lib_common_ai/utility",
+    "origin": "lib_common_ai 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@lib_common_sounds/main",
+    "origin": "lib_common_sounds 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_common_sounds\\16\\src\\main.lua"
+  },
+  {
+    "key": "@lib_control/main",
+    "origin": "lib_control 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_control\\46\\src\\main.lua"
+  },
+  {
+    "key": "@lib_control/require_libs",
+    "origin": "lib_control 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_control\\46\\ui\\script\\require_libs.lua"
+  },
+  {
+    "key": "@lib_control/trigger_module_main_1",
+    "origin": "lib_control 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_control\\46\\ui\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@lib_control/trigger_validator",
+    "origin": "lib_control 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_control\\46\\ui\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@lib_game_options/gift_code",
+    "origin": "lib_game_options 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_game_options\\106\\src\\gift_code.lua"
+  },
+  {
+    "key": "@lib_game_options/main",
+    "origin": "lib_game_options 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_game_options\\106\\src\\main.lua"
+  },
+  {
+    "key": "@lib_game_options/rename",
+    "origin": "lib_game_options 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_game_options\\106\\src\\rename.lua"
+  },
+  {
+    "key": "@lib_game_options/user_info",
+    "origin": "lib_game_options 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\lib_game_options\\106\\src\\user_info.lua"
+  },
+  {
+    "key": "@lua_plus/base",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\init.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/actor",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\actor.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/advertise",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\advertise.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/ai",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\ai.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/ai_attack",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\ai_attack.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/area",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\area.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/attack",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\attack.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/buff",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\buff.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/camera",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\camera.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/capturer",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\capturer.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/cheat",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\cheat.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/common",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\common.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/damage",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\damage.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/eff_param",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\eff_param.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/game",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\game.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/gamechat",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\gamechat.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/global_variable",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\global_variable.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/hook",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\hook.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/item",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\item.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/lightning",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\lightning.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/localization",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\localization.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/loot_pool",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\loot_pool.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/minimap",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\minimap.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/mover",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\mover.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/player",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\player.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/point",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\point.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/quest",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\quest.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/simple_ui",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\simple_ui.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/skill",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\skill.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/snapshot",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\snapshot.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/sound",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\sound.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/tds_score",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\tds_score.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/test",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\test.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/timer",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\timer.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/timershow",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\timershow.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/trigger",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\trigger.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/unit",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\unit.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/单位组",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\单位组.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/单位组_玩家组api",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\单位组_玩家组api.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/单位过滤器",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\单位过滤器.lua"
+  },
+  {
+    "key": "@lua_plus/base/base_lua_plus/附着点",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\base_lua_plus\\附着点.lua"
+  },
+  {
+    "key": "@lua_plus/base/obj_check",
+    "origin": "server_lua_plus 包（lua_plus 库）",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\server_lua_plus\\14\\base\\obj_check.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时根 = 构建合并入口 init）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/api",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\api\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/api/math_util",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\api\\math_util.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/bagconfig",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\BagConfig.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/config",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\config.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/const/game_common_const_tpl",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\const\\game_common_const_tpl.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/desert",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\desert.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/gameconfig",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\GameConfig.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/gameevents",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\GameEvents.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/playercolor",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\PlayerColor.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/protocol",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\Protocol.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/sceinit",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\SceInit.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/shopconfig",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\ShopConfig.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/common/skillconfig",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\common\\SkillConfig.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/api",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\api\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/api/sync_util",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\api\\sync_util.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/bagsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\BagSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/bosssystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\BossSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/buffsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\BuffSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/bushsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\BushSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/config",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\config.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/const/game_server_const_tpl",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\const\\game_server_const_tpl.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/dropsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\DropSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/gameserver",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\GameServer.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/gmsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\GMSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/mapdata",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\MapData.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/playercombat",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\PlayerCombat.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/playermanager",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\PlayerManager.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/regensystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\RegenSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/sceinit",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\SceInit.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/shopsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\ShopSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillaoe",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillAoE.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillbase",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillBase.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillblack",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillBlack.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillblink",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillBlink.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillbreak",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillBreak.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillbush",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillBush.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillcure",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillCure.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skilldisguise",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillDisguise.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillghost",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillGhost.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillheal",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillHeal.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillpull",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillPull.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillroot",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillRoot.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillshield",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillShield.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillspeed",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillSpeed.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillsummon",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillSummon.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skills/skillwall",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\skills\\SkillWall.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/skillsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\SkillSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/summonsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\SummonSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/teamsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\TeamSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/visibilitysystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\VisibilitySystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_game_server/server/wallsystem",
+    "origin": "游戏项目 .bgd/src（bgd_game_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\src\\server\\WallSystem.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时根 = 构建合并入口 init）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/class",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\class.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/co",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\co.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/deque",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\deque.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/event_bus",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\event_bus.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/event_deque",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\event_deque.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/exception",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\exception.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/json",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\json.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/log",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\log.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/promise",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\promise.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/protocol",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\protocol.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/read_db",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\read_db.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/api/tosceclass",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\api\\ToSceClass.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/config",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\config.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/common/const/keyboard",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\common\\const\\keyboard.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/server",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\server\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/server/api",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\server\\api\\init.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/server/config",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\server\\config.lua"
+  },
+  {
+    "key": "@p_55a3/bgd_libs_server/server/const/server_event",
+    "origin": "游戏项目 .bgd/libs（bgd_libs_server 运行时形态）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\.bgd\\libs\\server\\const\\server_event.lua"
+  },
+  {
+    "key": "@p_55a3/main",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\main.lua"
+  },
+  {
+    "key": "@p_55a3/obj/actor/actor",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\actor\\actor.lua"
+  },
+  {
+    "key": "@p_55a3/obj/buff/buff",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\buff\\buff.lua"
+  },
+  {
+    "key": "@p_55a3/obj/constant",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\constant.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\init.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/access_config/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\access_config\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/actor/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\actor\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/ai/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\ai\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/aibehavior/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\aibehavior\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/behavior/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\behavior\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/bloodstrip/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\bloodstrip\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/buff/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\buff\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/camera/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\camera\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/camera_property/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\camera_property\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/campaign/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\campaign\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/chapter/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\chapter\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/character/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\character\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/conversation/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\conversation\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/conversation_choice_item/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\conversation_choice_item\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/custom_player_attribute/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\custom_player_attribute\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/custom_unit_attribute/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\custom_unit_attribute\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/custom_unit_attribute_string/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\custom_unit_attribute_string\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/dict",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\dict.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/effect/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\effect\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/fishpond/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\fishpond\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/force/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\force\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/func_ref/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\func_ref\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/game_mechanics/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\game_mechanics\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/game_options/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\game_options\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/gameplay/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\gameplay\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/gui_ctrl/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\gui_ctrl\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/image_styles/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\image_styles\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/inventory_config/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\inventory_config\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/inventory_slot/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\inventory_slot\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/item/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\item\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/item_class/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\item_class\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/item_container/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\item_container\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/level/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\level\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/link_node/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\link_node\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/lobby_resource/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\lobby_resource\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/lobby_resource_gain/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\lobby_resource_gain\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/lobby_resource_gain_group/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\lobby_resource_gain_group\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/lobby_resource_waytoget/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\lobby_resource_waytoget\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/loot/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\loot\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/loot_class/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\loot_class\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/loot_pool/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\loot_pool\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/map_config/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\map_config\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/material_prop/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\material_prop\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/model/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\model\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/mover/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\mover\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/particle/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\particle\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/quest/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\quest\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/quest_condition/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\quest_condition\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/quest_type/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\quest_type\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/random_world/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\random_world\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/random_world_config/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\random_world_config\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/response/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\response\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/riseletter/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\riseletter\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/shortcut_config/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\shortcut_config\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/sound/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\sound\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/spawner/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\spawner\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/spell/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\spell\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/target_indicator/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\target_indicator\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/unit/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\unit\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/unit_level_profile/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\unit_level_profile\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/wave/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\wave\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/effect/way_point/data",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\effect\\way_point\\data.lua"
+  },
+  {
+    "key": "@p_55a3/obj/spell/spell",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\spell\\spell.lua"
+  },
+  {
+    "key": "@p_55a3/obj/unit/unit",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\obj\\unit\\unit.lua"
+  },
+  {
+    "key": "@p_55a3/scene/default/area_save",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\scene\\default\\area_save.lua"
+  },
+  {
+    "key": "@p_55a3/trigger_module_main_1",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@p_55a3/trigger_validator",
+    "origin": "游戏项目 script/（触发器/数据生成物）",
+    "source": "C:\\Users\\woaye\\Documents\\SCE Projects\\test_res002\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@smallcard_get_items/main",
+    "origin": "smallcard_get_items 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_get_items\\111\\src\\main.lua"
+  },
+  {
+    "key": "@smallcard_get_items/module",
+    "origin": "smallcard_get_items 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@smallcard_get_items/require_libs",
+    "origin": "smallcard_get_items 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_get_items\\111\\ui\\script\\require_libs.lua"
+  },
+  {
+    "key": "@smallcard_get_items/trigger_module_main_1",
+    "origin": "smallcard_get_items 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_get_items\\111\\ui\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@smallcard_get_items/trigger_validator",
+    "origin": "smallcard_get_items 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_get_items\\111\\ui\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@smallcard_inventory/main",
+    "origin": "smallcard_inventory 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_inventory\\80\\src\\main.lua"
+  },
+  {
+    "key": "@smallcard_inventory/proto",
+    "origin": "smallcard_inventory 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@smallcard_inventory/proto_v2",
+    "origin": "smallcard_inventory 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@smallcard_inventory/require_libs",
+    "origin": "smallcard_inventory 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_inventory\\80\\ui\\script\\require_libs.lua"
+  },
+  {
+    "key": "@smallcard_inventory/score_save",
+    "origin": "smallcard_inventory 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@smallcard_inventory/trigger_module_main_1",
+    "origin": "smallcard_inventory 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_inventory\\80\\ui\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@smallcard_inventory/trigger_validator",
+    "origin": "smallcard_inventory 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_inventory\\80\\ui\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@smallcard_inventory/关闭玩家背包",
+    "origin": "smallcard_inventory 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_inventory\\80\\src\\关闭玩家背包.lua"
+  },
+  {
+    "key": "@smallcard_inventory/打开玩家背包",
+    "origin": "smallcard_inventory 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_inventory\\80\\src\\打开玩家背包.lua"
+  },
+  {
+    "key": "@smallcard_mail/mail",
+    "origin": "smallcard_mail 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@smallcard_mail/main",
+    "origin": "smallcard_mail 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_mail\\75\\src\\main.lua"
+  },
+  {
+    "key": "@smallcard_mail/module",
+    "origin": "smallcard_mail 包（未找到源码）",
+    "source": null
+  },
+  {
+    "key": "@smallcard_mail/trigger_module_main_1",
+    "origin": "smallcard_mail 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_mail\\75\\ui\\script\\trigger_module_main_1.lua"
+  },
+  {
+    "key": "@smallcard_mail/trigger_validator",
+    "origin": "smallcard_mail 包",
+    "source": "D:\\sce_open\\api-13\\2026_08_27\\smallcard_mail\\75\\ui\\script\\trigger_validator.lua"
+  },
+  {
+    "key": "@tds_score",
+    "origin": "tds_score 库（无独立包，引擎侧）",
+    "source": null
+  },
+  {
+    "key": "@tds_score/new_base_score",
+    "origin": "tds_score 库（无独立包，引擎侧）",
+    "source": null
+  },
+  {
+    "key": "@tds_score/score",
+    "origin": "tds_score 库（无独立包，引擎侧）",
+    "source": null
+  },
+  {
+    "key": "@tds_score/tds_score",
+    "origin": "tds_score 库（无独立包，引擎侧）",
+    "source": null
+  },
+  {
+    "key": "@tds_score/use_mysql",
+    "origin": "tds_score 库（无独立包，引擎侧）",
+    "source": null
+  }
+]

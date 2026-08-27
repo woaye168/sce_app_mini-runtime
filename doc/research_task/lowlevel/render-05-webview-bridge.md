@@ -1,11 +1,12 @@
 # webview 深度：miniblink 内核 + lua↔JS 桥 + canvas2d 自定义渲染通道
 
-> 研究日期：2026-08-24 | 状态：canvas2d 渲染 + lua→JS（run_js）实证；JS→lua（web_message）未通（路由待查）
+> 研究日期：2026-08-24 | 状态：canvas2d 渲染 + lua→JS（run_js）实证；~~JS→lua（web_message）未通（路由待查）~~
+> ⚠️ **修正（2026-08-27，dl-01）**：本文「JS→lua 未通」结论已被推翻——JS→lua 桥已完整打通并三端上线实测（PC/Android/iOS）。根因 = imgui 通道建的控件不在 `base.ui.map` 且未 `register_event`，`ui_events.on_web_message` 静默丢弃；解法 = 手动登记 `base.ui.map[id].event.on_web_message` + `base.ui.gui.register_event(id,'on_web_message')`（cgui `cg.webview` 的 `opts.on_web_message` 已内置）。详见 [webview-bridge.md](../research/webview-bridge.md) §2、§6.1 与 [pak-io-native.md](../research/pak-io-native.md) §7.7。
 > 前置：render-03（imgui 通道）
 
 ## 0. 一句话结论
 
-游戏内 webview 控件 = **miniblink 离屏浏览器**（`WebEnvMiniblink.cpp`，UA=Chrome/69，非 CEF/WebView2 主路径）渲染进 UI 纹理；经 imgui 直驱在 StateGame 可跑**任意 HTML/canvas2d**（自定义 2D 光栅渲染逃生口，实证棋盘格页面）；lua→JS 用 `run_js` 属性实证可用；JS→lua 桥（`scelua.send_string` / `chrome.webview.postMessage`）在 StateGame imgui 路径下消息未到达 lua（事件路由或桥注入条件待查）。
+游戏内 webview 控件 = **miniblink 离屏浏览器**（`WebEnvMiniblink.cpp`，UA=Chrome/69，非 CEF/WebView2 主路径）渲染进 UI 纹理；经 imgui 直驱在 StateGame 可跑**任意 HTML/canvas2d**（自定义 2D 光栅渲染逃生口，实证棋盘格页面）；lua→JS 用 `run_js` 属性实证可用；~~JS→lua 桥（`scelua.send_string` / `chrome.webview.postMessage`）在 StateGame imgui 路径下消息未到达 lua（事件路由或桥注入条件待查）~~ → **已打通**：JS→lua 双向桥全通，见 [webview-bridge.md](../research/webview-bridge.md)。
 
 ## 1. 内核与桥（scegame-tester-strings 542120-542165 实证）
 
@@ -29,11 +30,11 @@ if (!window.chrome.webview) {
 | --- | --- | --- |
 | imgui webview + html 原始串（canvas2d 棋盘格 + 周期重绘） | ✅ 渲染 | capture_1787506928.png |
 | `ui.set_control_prop('main[wv_probe]>webview0', 'run_js', js)` | ✅ 页面执行（LUA2JS-OK 黄字上屏） | capture_1787507160.png |
-| JS `scelua.send_string('tick n')` → `ui_events.on_web_message` | ❌ 一条都没到 | 日志无记录 |
+| JS `scelua.send_string('tick n')` → `ui_events.on_web_message` | ❌ 一条都没到（**2026-08-27 修正：已打通**，imgui 控件需手动登记 base.ui.map + register_event，见 [webview-bridge.md](../research/webview-bridge.md) §2） | 日志无记录 |
 | `ui.register_event('probe_wv2', 'on_web_message')` / `ui.RegisterEvent(层级id, ...)` | 调用不报错但无效 | 同上 |
 
 - **imgui 控件的层级 id**：`imgui_state().id` 在 begin 块内返回如 `main[wv_probe]>webview0`——可直接用于 `set_control_prop`（run_js 实证）。
-- JS→lua 未通的假设：① web_message 事件路由依赖 base.ui 声明式创建时的 subscribe_now（imgui 路径没走）；② StateGame 的 webview 不注入 scelua 桥（桥注入条件可能与 state/通道相关）；③ on_web_message 的 ui_events 分发需要控件名精确匹配（层级 id vs 短名）。下轮鉴别：在页面里把 `typeof scelua` / `typeof chrome.webview` 用 run_js 读回（经画面文字显示），确认桥是否注入。
+- ~~JS→lua 未通的假设：① web_message 事件路由依赖 base.ui 声明式创建时的 subscribe_now（imgui 路径没走）；② StateGame 的 webview 不注入 scelua 桥（桥注入条件可能与 state/通道相关）；③ on_web_message 的 ui_events 分发需要控件名精确匹配（层级 id vs 短名）。~~ **2026-08-27 鉴别完毕**：假设①命中——`ui_events.on_web_message` 查 `base.ui.map[控件id]`，不在 map 即静默丢弃；桥（scelua polyfill）imgui 通道也照常注入。解法是手写三步登记（[webview-bridge.md](../research/webview-bridge.md) §2）。
 
 ## 3. canvas2d 自定义渲染通道（tiled/任意 2D 的生产级替代）
 

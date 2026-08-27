@@ -21,7 +21,7 @@
 | [render-02-probes.md](render-02-probes.md) | base.ui 探针矩阵：特效直路径破解（属性类型敏感）、sprites/spine 实证 | ✅ 完成 |
 | [render-03-imgui-channel.md](render-03-imgui-channel.md) | ★ imgui 立即模式直驱通道：webview/video StateGame 内渲染成功 | ✅ 完成 |
 | [render-04-model-chain.md](render-04-model-chain.md) | ★ 本地模型：数编注册链全解（entry_data.ini→obj lua→native），actor/set_asset 实测矩阵 | ✅ 完成 |
-| [render-05-webview-bridge.md](render-05-webview-bridge.md) | webview=miniblink 内核；canvas2d 通道 + run_js(lua→JS) 实证；JS→lua 未通 | ✅ 完成 |
+| [render-05-webview-bridge.md](render-05-webview-bridge.md) | webview=miniblink 内核；canvas2d 通道 + run_js(lua→JS) 实证；~~JS→lua 未通~~ → **已通**（见 [webview-bridge.md](../research/webview-bridge.md)） | ✅ 完成 |
 | [render-06-unit-change-model.md](render-06-unit-change-model.md) | ★ unit_change_model 完整破解：prefab 相对路径直渲本地模型（根因=负 id preview 单位无效，须真实单位） | ✅ 完成 |
 | [render-11-pak-resources.md](render-11-pak-resources.md) | 发布 pak 资源规则：自定义模型依赖件不进地图 pak，线上靠 user_libs 分发（✅ 用户 E2E 实证） | ✅ 完成 |
 | [render-07-managed-dll.md](render-07-managed-dll.md) | 官方 C# managed dll 逆向（TNND 解密+dnfile）：架构地图 + Sprite2D.TextureRect 图集源矩形线索 | ✅ 完成 |
@@ -67,7 +67,7 @@
 ### 渲染
 - ~~unit:change_model/attach_model 实测~~ → render-06（change_model 破解）；render-09（unit_attach_model 客户端判死）→ **render-10 官方 actor 附着通道打通**（数编脚本化 + create_actor_at + attach_to 视觉实证）。
 - ~~entry_data.ini model/actor 条目模板固化~~ → render-10 §2 完成（模板 + 生效流程：写 ini → 删两个 obj save_info.json → bump editor 戳 → 重开编辑器 → full 调试）。
-- ~~webview JS→lua 鉴别~~ → render-05 §5：编辑器 PIE 里 base.ui webview 创建成功但**页面不加载**（check_webview_environment=true 不是阀门；死亡点=StateGame 渲染管线不驱动 webview 控件），JS→lua 因此无消息；imgui 通道页面可跑。~~webview 线上 tester 验证~~ → render-12 完成（canvas2d 上屏）。
+- ~~webview JS→lua 鉴别~~ → render-05 §5：编辑器 PIE 里 base.ui webview 创建成功但**页面不加载**（check_webview_environment=true 不是阀门；死亡点=StateGame 渲染管线不驱动 webview 控件，此结论仍成立——webview-bridge.md §6.1 确认与互通无关），JS→lua 因此无消息；imgui 通道页面可跑。**2026-08-26 终版：JS→lua 双向桥全通**——imgui 控件手动登记 `base.ui.map[id].event.on_web_message` + `register_event` 即收消息，三端上线实测（[webview-bridge.md](../research/webview-bridge.md) §2）。~~webview 线上 tester 验证~~ → render-12 完成（canvas2d 上屏）。
 - ~~video https mp4 播放实测~~ → render-12：线上真局实证（播放器播完 2:18 mp4 + webview canvas2d 上屏，imgui 通道线上不崩）。~~GameWorld+viewport 复刻~~ → render-13：UIWorld 组件栈全解+世界渲 RT 不崩；显示侧剩**数编 UIScene 模板 + BindToUIScene** 唯一路径（下轮：entry_data 脚本化建 UIScene 控件 + 线上复验）。
 - ~~characters 等 3D 资产发布进 pak 规则确认~~ → render-11 完成 + 用户 E2E 实证（render-14 通道线上生效）。
 - ~~用户线索：逆向 official_dotnet_bcl_package/6 与 official_client_deps_dll_package/23~~ → render-07 已完成（Sprite2D.TextureRect 线索；云变量无突破）。
@@ -100,6 +100,7 @@
 - 2026-08-25 **★ render-20 实证收口**：① G33 用用户 virtual_effect.lua 原样三入口终审虚拟数编（CreateActor/ModelActor.new=nil、set_asset 静默 no-op、视觉对照确认；lua 层全通）——虚拟数编有效域=仅 lua cache 消费者；② native 日志 12 会话扫描：**表加载=会话启动一次，任何 load_map（含 UIWorld innerWorld/bogus 图）永不触发表加载**——伪造目录注入路线判死；③ 新坑：引擎 lua 不接受 `|` 前缀注释行（整卷判死），外部文件需先清洗；restart_last 能拾取已入库文件内容变更。渲染免数编收窄至 frida 运行时注入唯一主线。
 - 2026-08-25 **★★ render-21 动态逆向爆发**：① frida 链式解析打通（set_asset impl→[actor+0x28]vfunc+0x60→manager→vtbl 查找族）；② set_asset 分派链终版（ModelActor=0x17837d0/vfunc+0x60 MODEL 表、EffectActor=0x179c0a0/vfunc+0x70 EFFECT 表，miss 静默 je；0x18129fb50 排除归 UI particle setter）；③ ACTOR 表桶链全解（mgr+0x230，node{next,typeid@+0x18,entry 内联@+0x20}）+ **typeid=djb2-32(link) 精确验证**；④ MODEL 条目布局 dump（Asset=entry+0x28）；⑤ Tier-1 条目纯路径改写判死（apply 消费预载 mesh 句柄）；⑥ frida17 坑：3 字节 call 拒钩、readUtf8String(N) 遇 NUL 抛错。
 - 2026-08-25 **★ render-22 换图机制移植实验（用户 20:26 线索）**：① xdeditor 重载链源码级全解（强制重新加载=EDITOR.unload_map+load_map；打开=+update_map_libs；EDITOR 全局=native 注入 xdeditor lua 态）；② **游戏 lua 无此绑定**（G34a 四层 dump 实证）；③ 模块级 LoadMainMap/reset frida 三轮直调判死：**同名 no-op（strcmp 门控，当前图标识=绝对路径）、异名 ret=0 但进程内存爆冲 32GB 死亡、reset 拆卸即 AV**——游戏客户端会话无法承受换图，重载必须编辑器侧完整编排；④ frida 直调通路打通（getter=(L,magic)→ctx、Win64 参数序坑、lua54 165 导出、坏进程 [ctx+0x10] 鉴别）；⑤ UIWorld CreateActor 对 lua 缓存缺项会抛 lua 错误（uiworldscript:279 不防御），与 native nil 是两种死亡形态。下轮：apply 链消费面逆向 / 克隆伪造条目 / 大厅 mini-runtime 换游戏流程（线上通道）。
+- 2026-08-27 **知识修正（direct_load 任务 dl-01）**：依据 [webview-bridge.md](../research/webview-bridge.md)（双向桥全通 + 三端上线实测）与 [pak-io-native.md](../research/pak-io-native.md)（pak 提取 + 绝对路径视频播放三端实测），修正 render-03/05/12 及本 README 中过时的 webview/video 结论：「JS→lua 未通」→ 已通（imgui 控件需登记 base.ui.map + register_event）；「video 线上会崩」→ render-12 证伪；「CEF」→ miniblink；「scene 控件死亡」→ render-14 已修正。逐条修正清单见 [dl-01-knowledge-corrections.md](../direct_load/dl-01-knowledge-corrections.md)。
 
 ## 关键已知结论速查
 
@@ -112,10 +113,11 @@
 ### 渲染（既有研究 ui-render-atlas-canvas.md，editor-patch 仓库）
 - ui.* 注册块 = 官方 native 边界全集（sceengine-strings:443417-443571）；控件属性无 UV/源矩形。
 - canvas_texture_* 编辑器可用、线上 PCBox 硬崩（平台 bug，不可依赖）。
-- **imgui 立即模式直驱（ui.imgui_begin_view/begin_ui/props）= StateGame 更底层通道**：webview/video 控件只有它能激活（render-03）；webview 是引擎内嵌离屏渲染（CEF 合成进 UI 纹理，非 HWND overlay）。
+- **imgui 立即模式直驱（ui.imgui_begin_view/begin_ui/props）= StateGame 更底层通道**：webview/video 控件只有它能激活（render-03）；webview 是引擎内嵌离屏渲染（【2026-08-27 修正】miniblink 合成进 UI 纹理，非 CEF/HWND overlay）；**lua↔JS 双向桥已全通**（imgui 通道手动登记 base.ui.map + register_event；三端上线实测，[webview-bridge.md](../research/webview-bridge.md)）。
+- **视频已完整突破（生产级）**：pak 提取（io.ExtractPakFile PascalCase 漏网）+ 绝对路径/file:// 播放 + 双轨音频 + 三端实测，见 [pak-io-native.md](../research/pak-io-native.md)。
 - **特效 .effect 直路径可用**（particle 控件 effect 属性；属性类型必须 number/table，字符串静默不渲，render-02 §1）。
-- spine .skel 直路径自由；scene 控件 StateGame 死亡（模型 UI 通道未打通）；**unit_change_model = 世界内本地模型通道（render-06）：真实单位 id + prefab 相对路径即可，preview 负 id 无效**。
-- 待补：GameWorld+viewport 复刻、webview run_js 双向通信、模型世界内通道实测。
+- spine .skel 直路径自由；~~scene 控件 StateGame 死亡（模型 UI 通道未打通）~~ → **render-14 已修正**（死亡的是用法不是控件；UIScene/UIWorld 通道本地模型进 UI 编辑器+线上均生效）；**unit_change_model = 世界内本地模型通道（render-06）：真实单位 id + prefab 相对路径即可，preview 负 id 无效**。
+- 待补：GameWorld+viewport 复刻、~~webview run_js 双向通信~~（2026-08-26 双向桥全通，webview-bridge.md）、模型世界内通道实测。
 
 ## 进度日志
 

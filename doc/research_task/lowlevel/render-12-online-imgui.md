@@ -1,6 +1,7 @@
 # imgui 通道线上（tester PCBox）实证：video https mp4 + webview canvas2d
 
 > 研究日期：2026-08-24 | 状态：✅ 线上真局实证（截图存证 test/temp/tester_p55a3_game.png）
+> ⚠️ **修正（2026-08-27，dl-01）**：本文「JS→lua（web_message）线上仍未通」已被推翻——2026-08-26 双向桥完整打通并三端（PC/Android/iOS）上线实测：根因 = imgui 控件不在 `base.ui.map` 被 `ui_events` 静默丢弃，解法 = 手动登记 + `register_event`（cgui `cg.webview` 内置）。见 [webview-bridge.md](../research/webview-bridge.md) §2、[pak-io-native.md](../research/pak-io-native.md) §7.7。
 > 前置：render-03（imgui 通道 PIE 实证）/ render-05（webview canvas2d + 线上未验证遗留）
 > 探针：test_res002 RenderProbe U28/U29（随 pak v97 发布测试环境，真局 imgui 每帧直驱）
 
@@ -23,7 +24,7 @@
 1. **tiled 图集** → **webview canvas2d 通道（线上已实证）**：图集 PNG base64 经 pak 内嵌数据模块 → 页面 drawImage 按 tile 映射 → lua 经 run_js 每帧推状态。绕开 clip/sprites 性能问题，浏览器级 GPU 加速。消滚动条：html 加 `overflow:hidden` + 精确尺寸（render-05 §3）。
 2. **视频** → imgui video + https mp4（线上已实证）；file:// 被拦（render-03），必须 http(s)/data:。
 3. 模型/特效/spine → render-02/06/10 既有结论不变（编辑器 PIE 通道；线上未逐一复验，但同属 StateGame 常规控件，风险低）。
-4. JS→lua（web_message）线上仍未通（render-05 §2 假设待鉴别；本次未复测）——run_js（lua→JS）单向可用已够 canvas2d 通道用。
+4. ~~JS→lua（web_message）线上仍未通（render-05 §2 假设待鉴别；本次未复测）~~ → **2026-08-26 已通**（[webview-bridge.md](../research/webview-bridge.md) §2 机制破解 + 三端上线实测）；run_js（lua→JS）单向可用已够 canvas2d 通道用。
 
 ## 3. 验证环境记录
 
