@@ -153,7 +153,7 @@ if (!window.chrome.webview) {
     window.scelua = { send_string: function(msg){ chrome.webview.postMessage(msg) } ...
 ```
 
-- JS→lua：`scelua.send_string(str)` → lua 侧 `on_web_message` 事件（官方 base.ui 用法：bind event on_web_message，client_base lobby.lua:541 / xdeditor resource_store_web_ui.lua:33-49，消息为 JSON 字符串）。**StateGame imgui 路径下消息未到达 lua（未通）**——假设：① web_message 事件路由依赖 base.ui 声明式创建时的 subscribe_now；② StateGame webview 不注入 scelua 桥；③ on_web_message 分发需控件名精确匹配。鉴别法：页面里 `typeof scelua` 用 run_js 读回上屏。
+- JS→lua：`scelua.send_string(str)` → lua 侧 `on_web_message` 事件（官方 base.ui 用法：bind event on_web_message，client_base lobby.lua:541 / xdeditor resource_store_web_ui.lua:33-49，消息为 JSON 字符串）。~~StateGame imgui 路径下消息未到达 lua（未通）~~ **→ 2026-08-26 勘误：imgui 通道可通**。三个假设全部排除——① scelua 桥 imgui 下照常注入（run_js 自证 `typeof scelua==='object'`）；② imgui state 不回填该字段（`imgui_state()` 只回 `id,name`），但消息根本不经过 state；③ 真实派发链 = `ui_events.on_web_message(id,msg)` → `base.ui.map[id].event.on_web_message`（script-199 base/ui/event.lua），imgui 控件不在 base.ui.map 故被 `if not ui then return` 静默丢弃。**解法：`base.ui.map[控件id] = { event = { on_web_message = fn } }` + `base.ui.gui.register_event(控件id, 'on_web_message')`**（控件 id 用 imgui `state().id` 拿，形如 `main[view]>P0>webview0`）。探针实证收到 `{"type":"touch_probe",...}`。cgui `M.webview` 的 `opts.on_web_message` 已内置此登记。详见 pak-io-native.md §7.7。
 - lua→JS：控件属性 `run_js`（实证可用，页面执行上屏）。相关属性：url/html/run_js/web_message/web_type/web_dev_tools/web_import_script/isolated；`web_import_script` = 注入额外 JS。
 - **canvas2d 自定义渲染通道（tiled/任意 2D 的生产级替代）**：lua 把图集 PNG 经 base64 内嵌进 html（require 数据模块，pak 感知）→ 页面 canvas2d 按 tile 映射 drawImage（浏览器级 GPU 加速，一张图集一次解码）→ webview 显示；lua→JS 数据通道 = run_js（可每帧推状态）。绕开 clip/sprites 性能问题。
 - 消滚动条：html 加 `overflow:hidden` + 精确尺寸（body 默认 margin/滚动区会出滚动条）。
@@ -956,7 +956,7 @@ sprite.SetAnimation("walk", LoopMode2D.ForceLooped); sprite.SetSkin("default");
 4. **若注册表插入判死的退路**：ResourceCache 通道（材质/纹理自由）+ UI particle 控件 .effect 直路径 + 主世界 unit_change_model + 数编条目脚本化预生成（§7 流程）。
 5. **大厅/mini-runtime 通道**：平台级「加载其他游戏」的正解（官方换游戏流程，线上可达）——mini-runtime 组装大厅盒子流程 + dll 补丁触发。大厅动态加载机制反查：大厅能动态加载渲染其他游戏的模型/地图，其资源加载链必然有免数编入口（或大厅专属数编下发机制）——从 lobby 源码/抓包入手。
 6. **编辑器侧自动化**：bgd_mcp_bridge 在 xdeditor 态直调 EDITOR.load_map/unload_map（编辑器工作流自动化；非线上）。
-7. **JS→lua（web_message）未通**：鉴别法 = 页面里 `typeof scelua` / `typeof chrome.webview` 用 run_js 读回上屏，确认桥是否注入（§3.7 三假设）。
+7. ~~**JS→lua（web_message）未通**~~ **→ 2026-08-26 已打通，此条关闭**：桥在 imgui 通道照常注入，之前收不到是派发链缺登记（imgui 控件不在 base.ui.map + 没 register_event），解法见 §3.7 勘误与 webview-bridge.md §2。cgui `M.webview` 已内置，双向桥 + 全手势事件（press/release/click/double_click/long_press/move）PIE + 三端线上全部实证。
 8. **数编脚本化 bgd 工具化**：bgd_sce_tools 集成「写 ini + 删 obj save_info + bump 戳」一键流程；手写 GUI 页面通道的编辑器兼容性（编辑器保存会清手写页）。
 9. **fbx/gltf→m.mdl 离线转换**（编辑器导入管线做的转换，独立课题）。
 10. 其他小项：native 表真实数据源精确文件清单（hook LoadMapTable 读文件点）；`set_mesh_asset_material`/`get_mesh_asset` 语义深化；`GetGameWorldInfos` 返回空表待查；knead_human 完整时序（解 defaultui_63 UPAK）；miniblink 离屏合成性能压测；数编 CollectRes / objref.txt / full.ref 资源收集机制；gameui 52（api 2000）无 script 目录悬案；服务端 actor attach + 联机同步表现（sync 字段语义）；ActorAdditionModel 实建（自动骨骼挂载，socket 可空）；2.0 云数据 op 面 Entrance+MessagePack 线索。

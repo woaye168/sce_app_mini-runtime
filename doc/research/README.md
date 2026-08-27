@@ -14,6 +14,9 @@
 | [payload-packages.md](payload-packages.md) | 载荷包体系：update-info 契约、包格式（7z/TNND/UPAK）、落位布局、版本注册表合成、基座资产 | 涉及 payload sync、包解包、版本跟随、字体/资源缺失时 |
 | [cloudvar-lowlevel.md](cloudvar-lowlevel.md) | **云变量底层全解**：sce.s/ScoreArchive 本质、Entrance 0xA000 协议解码、op 码/MessagePack 值编码/签名终表、权限模型、直连客户端与限流、2.0 云数据 API | 涉及云变量读写、entrance_client 直连、权限/限流问题、云数据能力调研时 |
 | [render-lowlevel.md](render-lowlevel.md) | **渲染底层全图**：各渲染通道能力矩阵与正确用法（imgui/UIScene/换模/附着/特效直路径）、数编注册链与脚本化、免数编攻坚判死记录（native 注册表逆向）、2.0 WasiCore 渲染面 | 涉及 UI/模型/特效/图集/webview/video 渲染、数编注册、动态资源加载时 |
+| [pak-io-native.md](pak-io-native.md) | **线上 pak 内容提取**：LuaIO 双名注册（PascalCase 漏网 isolation）逆向实证、ReadPakEntries/ExtractPakFile 签名与实测、三环境视频绝对路径策略、iOS 白屏排查计划 | 涉及线上读 pak 内容、要真实磁盘绝对路径（视频/外部工具）、io 沙箱绕过时 |
+| [common-table.md](common-table.md) | **引擎 common 表全集**（运行时枚举 + 注册表逆向双实证，双名机制/不对称坑/分类清单）；逐函数签名见 [common-table-editor.md](common-table-editor.md) / [common-table-tester.md](common-table-tester.md)（双引擎注册名一致） | 写代码找系统级 API（平台/剪贴板/窗口/性能/渲染开关）时 |
+| [webview-bridge.md](webview-bridge.md) | **webview lua↔JS 双向桥全解**：派发链（ui_events→base.ui.map）、三通道（cgui/imgui/base.ui）接法、run_js vs web_import_script、手势事件/console 转发、坑清单（含三端兼容全记录） | 写 webview 交互、JS 双向通信、调试 JS 报错、移动端适配时 |
 
 ## 研究方法论（贯穿所有文档）
 

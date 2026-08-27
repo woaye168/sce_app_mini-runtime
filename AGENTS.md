@@ -61,6 +61,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 | `restore_game` | 加密包一键还原：TNND → 7z → UPAK → 伪 KTX 图片转 PNG（BC1/2/3/7） |
 | `proto_extract` | 从 protobuf C++ 二进制提取内嵌 FileDescriptorProto |
 | `find_xref` / `disasm_at` | PE 字符串 RIP-xref 查找 / 线性反汇编（PE 解析手写在 examples/util） |
+| `lua_api_dump` | luaL_Reg 注册表导出 + capstone 签名推断（锚点字符串→qword 引用→走表；thunk 跟进 + 跳板 stub→IAT→lua54 取参分析）。用法 `lua_api_dump <PE> <锚点>`，如 common 表锚 `get_platform`、io 表锚 `read_pak_entries` |
 | `pe_imports` / `pe_exports` | PE 导入/导出表 dump（定位 TLS 栈归属等） |
 | `entrance_login_capture` | WSS 明文截获（spawn 挂起 → hook libgmessl SSL_read/write + ws2_32 connect 对照）→ jsonl |
 | `probe_wineditor` / `probe_libs` | wineditor 可下载性验证 / 依赖库三 variation 对比 |
