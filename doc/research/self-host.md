@@ -145,6 +145,7 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **服务器日志面板（0.5.1）**：`core/logbus.rs` 总线（`srv_log!` 宏 = println! + 5000 行环形缓冲 tee），game_host/host_server/lua_host 全部 stdout 日志进总线；「本地服务器」页右栏日志面板（滚屏/暂停滚屏 = 只冻结自动滚动照收新行、关键字筛选、清空）。
 - **host 停止联动（0.5.2）**：停止/重启 host 联动 taskkill 本页启动的全部账号客户端；页级 1s `request_repaint_after` 周期重绘——客户端被外部直接关窗时行状态自动回落（此前 egui 无交互不重绘，tasklist 探活永不执行）。
 - **秒开（0.5.4）**：首启动 22.5s → 3.6s（无变更再启动 1s）。三板斧：① staging 内容级增量（`files_equal` 逐字节比对跳过未变文件；硬链接只做首装快路径，跨卷自动降级复制——**教训：remove+hard_link 的"先删后失败"会丢文件，跨卷场景硬链接只在目标不存在时尝试**）；② 上传流水线化（每 20 文件 drain → 每 200，本地 host ack 即发即回，一问一答是大头）；③ `upload_project_incremental`（本地 host 同机直读目标端，内容一致跳过传输——无变更再启动 = 0 文件上传）。host 侧 upload 起始不再 remove_dir_all 清目录（write_upload 本就覆盖写）。
+- **联机 + 在线增量分发（0.6.0）**：本地服务器身兼游戏 host 与分发源。host 起时附 HTTP 分发服务（distrib.rs，端口=控制口+80=5083）：`/manifest`（staging 清单+xxh64）+ `/file` + `/base_assets`。对端 mini-client（bin/mini_client.rs，eframe 轻量启动器）输 IP/端口/userid → 引擎走官方 OSS 免鉴权（缺则 payload）→ 基座资产由房主 /base_assets 下发（**对端零 GitHub token**）→ 拉 manifest 增量比对本地缓存（size+xxh64）→ 只下变化文件 → 合成凭证进局。**踩坑**：① reqwest LAN 必须 `.no_proxy()`（系统代理拐走局域网请求）；② bsdtar 不能写 7z（只读），/base_assets 打 zip；③ Windows accept 套接字继承 nonblocking 的坑在 distrib 同样要 set_nonblocking(false)。本机模拟对端（127.0.0.1 三账号互见）+ 全量下载（1277 文件）已实证。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 

@@ -27,6 +27,12 @@ keyring = { version = "3", default-features = false, features = ["windows-native
 mlua = { version = "0.10", features = ["lua54", "vendored"] }
 # 0.5.0 R5：本地服务器账号库（SQLite，bundled 免外部 dll）
 rusqlite = { version = "0.32", features = ["bundled"] }
+# 0.6.0 R3：manifest 内容哈希（增量分发判定）
+xxhash-rust = { version = "0.8", features = ["xxh64"] }
+
+[[bin]]
+name = "mini-client"
+path = "src/bin/mini_client.rs"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_Console", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Foundation"] }

@@ -5,7 +5,7 @@
 // Windows 下不弹出黑色控制台窗口
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
-mod core;
+use sce_app_mini_runtime::core;
 mod ui;
 
 use std::path::PathBuf;
@@ -301,6 +301,7 @@ fn cli_local(args: &[String]) {
                         runtime_dir: runtime_dir.clone(),
                         env_domain: "editor-pd.spark.xd.com".into(),
                         account: acc.clone(),
+                        bind_addr: "127.0.0.1".into(),
                     },
                     &mut |msg| println!("[play] {msg}"),
                 ) {
@@ -545,7 +546,7 @@ fn cli_host(args: &[String]) {
                     .unwrap_or_else(|_| PathBuf::from("runtime"));
                 println!("项目 {project}，壳 host（真本地，无云端）启动...");
                 if let Err(e) = core::game_host::run(
-                    core::game_host::GameHostParams { port, runtime_dir, env_domain: env_domain.clone() },
+                    core::game_host::GameHostParams { port, runtime_dir, env_domain: env_domain.clone(), bind_addr: "127.0.0.1".into() },
                     None,
                 ) {
                     eprintln!("壳 host 退出: {e}");
@@ -718,6 +719,8 @@ struct App {
     ls_log_seq: u64,
     ls_log_scroll: bool,
     ls_log_filter: String,
+    /// host 绑定范围（0=本地 127.0.0.1 / 1=局域网 / 2=外网；后两者绑 0.0.0.0）
+    ls_bind_mode: usize,
     /// 启动前自动 payload sync 的进度
     debug_progress_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
@@ -756,6 +759,7 @@ impl Default for App {
             ls_log_seq: 0,
             ls_log_scroll: true,
             ls_log_filter: String::new(),
+            ls_bind_mode: 0,
             debug_progress_rx: None,
         }
     }

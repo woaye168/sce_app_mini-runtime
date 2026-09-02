@@ -1,0 +1,19 @@
+feat: 局域网/外网联机 + 在线增量分发客户端（0.6.0）
+
+- R1 日志字体：日志面板 monospace（无中文字形逐字分散）→ 正文比例字体
+- R2 host 绑定范围三态（本地 127.0.0.1 默认/局域网/外网 0.0.0.0），
+  界面显示局域网 IP；外网提示路由器转发 TCP 5003+UDP 5053+TCP 5083
+- R3 distrib.rs：HTTP 分发服务（端口=控制口+80=5083）——/manifest（staging
+  清单+xxh64）/file（白名单+路径穿越防护）/base_assets（基座资产 zip 打包
+  下发，对端零 GitHub token；踩坑：bsdtar 不能写 7z 只读，改 zip）
+- R4/R5 bin/mini_client.rs：对端轻量 eframe 启动器——输 IP/端口/userid →
+  异步（mpsc 进度不卡 UI）引擎官方 OSS 免鉴权 → 基座资产走房主 /base_assets
+  （注入 MINI_RUNTIME_BASE_ASSETS_URL）→ 拉 manifest 增量比对缓存
+  （size+xxh64）→ 只下变化文件 → 合成凭证（login=1+token=local-<userid>）
+  → spawn 引擎进局。踩坑：reqwest LAN 必须 .no_proxy()
+- lib 化：src/lib.rs（pub mod core）供 mini-client 复用；ui/* 的 crate::core
+  引用改 sce_app_mini_runtime::core
+- 冒烟钩子：mini-client --connect <ip> <port> <userid>（无 GUI 直跑）
+- CI：release 附带 mini-client.exe
+- 验收：本机模拟对端 127.0.0.1 三账号互见 + 全量下载 1277 文件 + 增量（0 文件）
+  已实证；跨机 GUI 待真机

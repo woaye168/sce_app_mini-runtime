@@ -259,7 +259,7 @@ fn sync_base_assets(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<
         }
     }
 
-    // ② 自分发下载
+    // ② 自分发下载（env MINI_RUNTIME_BASE_ASSETS_URL 覆盖 = 房主分发口/公开直链直下）
     let bytes = download_base_assets(log)?;
     let tmp = std::env::temp_dir().join(format!("mr_base_{}.7z", std::process::id()));
     std::fs::write(&tmp, &bytes)?;

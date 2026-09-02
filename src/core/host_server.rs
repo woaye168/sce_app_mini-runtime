@@ -360,8 +360,9 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
 
 /// 控制面监听线程体（game_host::run 拉起）
 /// stop 置位后退出（非阻塞 accept 轮询；game_host 停止/重启用）
-pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sync::atomic::AtomicBool>) -> Result<()> {
-    let addr = format!("127.0.0.1:{port}");
+/// bind_addr：127.0.0.1 = 仅本机；0.0.0.0 = 局域网/外网（远端客户端连控制面入局）
+pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sync::atomic::AtomicBool>, bind_addr: &str) -> Result<()> {
+    let addr = format!("{bind_addr}:{port}");
     let listener = TcpListener::bind(&addr).map_err(|e| anyhow!("控制面监听失败 {addr}: {e}"))?;
     listener.set_nonblocking(true)?;
     crate::srv_log!("[host-ctl] 控制面已监听 {addr}");

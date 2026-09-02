@@ -12,6 +12,8 @@ pub struct LocalPlayParams {
     pub runtime_dir: PathBuf,
     pub env_domain: String,
     pub account: LocalAccount,
+    /// host 绑定地址（127.0.0.1 本地 / 0.0.0.0 局域网+外网），UI 绑定范围选择传入
+    pub bind_addr: String,
 }
 
 /// 局控制连接（全局持有；上传/起局各一次）
@@ -41,6 +43,7 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
         port: 5003,
         runtime_dir: params.runtime_dir.clone(),
         env_domain: params.env_domain.clone(),
+        bind_addr: params.bind_addr.clone(),
     })?;
     log(format!("本地 host 已就绪: 127.0.0.1:{port}"));
 

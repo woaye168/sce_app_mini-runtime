@@ -1,6 +1,6 @@
 //! 调试标签页：方案 B 自托管启动（assign_host→上传→起局→拉起客户端），工作线程执行不阻塞 UI
 
-use crate::core::debug::{DebugParams, DebugSession, DebugStatus};
+use sce_app_mini_runtime::core::debug::{DebugParams, DebugSession, DebugStatus};
 use crate::App;
 use std::path::PathBuf;
 
@@ -17,7 +17,7 @@ impl App {
             ui.label("请先在宿主中打开项目");
             return;
         };
-        ui.label(format!("项目：{}", crate::core::disp(&project)));
+        ui.label(format!("项目：{}", sce_app_mini_runtime::core::disp(&project)));
 
         // 凭证
         let active = self.cred_store.active_label.clone();
@@ -27,7 +27,7 @@ impl App {
         }
 
         // 运行时选择（编辑器-api 为默认；对战平台测试/正式为既有 scegame 链路）
-        let project_api = crate::core::debug::read_map_settings(&project)
+        let project_api = sce_app_mini_runtime::core::debug::read_map_settings(&project)
             .map(|(_, api)| api)
             .unwrap_or(13);
         let kind_options = [
@@ -36,8 +36,8 @@ impl App {
             "星火对战平台 正式环境运行时".to_string(),
         ];
         let selected_kind = match self.debug_kind_sel {
-            1 => Some(crate::core::runtimes::RuntimeKind::TesterTest),
-            2 => Some(crate::core::runtimes::RuntimeKind::TesterProd),
+            1 => Some(sce_app_mini_runtime::core::runtimes::RuntimeKind::TesterTest),
+            2 => Some(sce_app_mini_runtime::core::runtimes::RuntimeKind::TesterProd),
             _ => None, // 默认编辑器-api
         };
         egui::ComboBox::from_label("运行时")
@@ -76,7 +76,7 @@ impl App {
         // 参数区
         if self.debug_runtime_input.is_empty() {
             self.debug_runtime_input = std::env::current_exe()
-                .map(|e| crate::core::disp(&e.with_file_name("runtime")))
+                .map(|e| sce_app_mini_runtime::core::disp(&e.with_file_name("runtime")))
                 .unwrap_or_default();
         }
         ui.horizontal(|ui| {
@@ -148,12 +148,12 @@ impl App {
                         return;
                     };
                     let host_mode = match self.debug_host_sel {
-                        1 => crate::core::debug::HostMode::Relay,
-                        2 => crate::core::debug::HostMode::Local,
-                        _ => crate::core::debug::HostMode::Cloud,
+                        1 => sce_app_mini_runtime::core::debug::HostMode::Relay,
+                        2 => sce_app_mini_runtime::core::debug::HostMode::Local,
+                        _ => sce_app_mini_runtime::core::debug::HostMode::Cloud,
                     };
                     // 前置校验：缺 HTTP 签名对时 assign_host 必失败，提前给明确引导（真本地不联云端，免检）
-                    if host_mode != crate::core::debug::HostMode::Local && !cred.info.can_sign() {
+                    if host_mode != sce_app_mini_runtime::core::debug::HostMode::Local && !cred.info.can_sign() {
                         self.status = "凭证缺 login_token/secret——请到「凭证」页重新「导入编辑器凭证」覆盖，或点击换一个凭证".into();
                         return;
                     }
@@ -205,7 +205,7 @@ impl App {
                         // 引擎未就绪时自动 payload sync（用户报过的「运行时没下载」痛点）
                         let kind_eff = params
                             .runtime_kind
-                            .unwrap_or(crate::core::runtimes::RuntimeKind::EditorApi(project_api));
+                            .unwrap_or(sce_app_mini_runtime::core::runtimes::RuntimeKind::EditorApi(project_api));
                         if !kind_eff.engine_ready(&params.runtime_dir) {
                             let _ = prog_tx.send(format!(
                                 "运行时 {} 未就绪，自动下载载荷中（首次约 150MB）...",
@@ -216,7 +216,7 @@ impl App {
                                 .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
                                 .and_then(|v| v.as_object().map(|o| o.keys().cloned().collect()))
                                 .unwrap_or_else(Vec::new);
-                            let sync_params = crate::core::payload::SyncParams {
+                            let sync_params = sce_app_mini_runtime::core::payload::SyncParams {
                                 runtime_dir: params.runtime_dir.clone(),
                                 env_domain: params.env_domain.clone(),
                                 api_version: kind_eff.api_version(project_api),
@@ -229,7 +229,7 @@ impl App {
                             let mut log = move |msg: String| {
                                 let _ = prog_tx2.send(format!("[载荷] {msg}"));
                             };
-                            if let Err(e) = crate::core::payload::sync(&sync_params, &mut log) {
+                            if let Err(e) = sce_app_mini_runtime::core::payload::sync(&sync_params, &mut log) {
                                 let _ = tx.send(StartOutcome { result: Err(format!("载荷同步失败: {e}")) });
                                 return;
                             }

@@ -301,6 +301,7 @@ impl DebugSession {
                     port: 5003,
                     runtime_dir: params.runtime_dir.clone(),
                     env_domain: params.env_domain.clone(),
+                    bind_addr: "127.0.0.1".into(),
                 })?;
                 log_warn(&format!("壳 host 已就绪: 127.0.0.1:{port}"));
                 host::HostInfo {

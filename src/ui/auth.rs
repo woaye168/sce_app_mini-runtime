@@ -1,6 +1,6 @@
 //! 凭证标签页：编辑器当前凭证 / 凭证库（收割/切换/删除/验证）/ 扫码自登录
 
-use crate::core::{auth, login, verify};
+use sce_app_mini_runtime::core::{auth, login, verify};
 use crate::App;
 
 impl App {
@@ -19,7 +19,7 @@ impl App {
 
         // ---- 当前编辑器凭证 ----
         ui.group(|ui| {
-            ui.label(format!("凭证文件：{}", crate::core::disp(&user_info_path)));
+            ui.label(format!("凭证文件：{}", sce_app_mini_runtime::core::disp(&user_info_path)));
 
         // ---- 后台任务回收（验证/刷新登录态都在工作线程，不卡 UI）----
         if let Some(rx) = &self.verify_rx {
@@ -166,7 +166,7 @@ impl App {
                                 .map(|e| e.with_file_name("runtime"))
                                 .unwrap_or_else(|_| std::path::PathBuf::from("runtime"));
                             std::thread::spawn(move || {
-                                let r = crate::core::login_state::fetch_identity(
+                                let r = sce_app_mini_runtime::core::login_state::fetch_identity(
                                     &runtime_dir,
                                     &info,
                                     &env,

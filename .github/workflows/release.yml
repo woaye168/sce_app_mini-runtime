@@ -30,6 +30,7 @@ jobs:
 
       - name: Build release
         run: cargo build --release
+        # 同时产出 mini-client.exe（0.6.0 对端联机启动器，房主分发给朋友用）
 
       - name: Generate app-release.json
         shell: pwsh
@@ -60,6 +61,7 @@ jobs:
           name: sce_app_mini-runtime ${{ github.ref_name }}
           files: |
             target/release/sce_app_mini-runtime.exe
+            target/release/mini-client.exe
             app-release.json
 
       - name: Upload base_assets.7z

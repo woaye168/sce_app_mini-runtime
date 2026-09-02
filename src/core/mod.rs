@@ -3,6 +3,7 @@ pub mod auth;
 pub mod capture;
 pub mod cmsg_pack;
 pub mod debug;
+pub mod distrib;
 pub mod host;
 pub mod local_accounts;
 pub mod local_host;

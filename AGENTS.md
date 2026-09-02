@@ -17,6 +17,8 @@
 
 ```
 src/main.rs            # 入口（bgd_appsdk 统一入口 + 业务 CLI 分发）+ 应用状态 + 壳实现
+src/lib.rs             # 库 crate（pub mod core）——mini-client 启动器复用核心逻辑
+src/bin/mini_client.rs # 对端联机启动器（0.6.0）：输 IP/端口/userid → 引擎官方 OSS + 游戏增量下载 → 进局
 src/core/mod.rs        # 模块声明
 src/core/auth.rs       # 凭证库（多账号 list/use/import；make_label 命名 {userid}_{时间}_{env}_{type}）
 src/core/login.rs      # 扫码登录
@@ -32,6 +34,7 @@ src/core/host_server.rs # 自研 host 控制面 TCP 服务端（0xF000 段：登
 src/core/game_host.rs   # 真本地 host 编排（R3 壳：登录应答+初始化消息群+tick/时钟/探测应答；R4：lua 编排脑接线——起局建脑/0x7006 路由/0x7008 出站/帧泵/广播挂起补发）
 src/core/lua_host.rs    # lua 宿主（0.5.0 R4）：mlua lua54 vendored 内嵌 VM + shim 面 + 自研 require 加载链（sanitize_lua ≥0x80 标识符清洗）
 src/core/cmsg_pack.rs   # cmsg_pack（msgpack 变体）pack/unpack + lua 值互转（零依赖）
+src/core/distrib.rs    # HTTP 分发服务（0.6.0）：/manifest（staging 清单+xxh64）/file（白名单+防穿越）/base_assets（基座资产打包下发，对端零 GitHub token）
 src/core/logbus.rs      # 服务器日志总线（srv_log! 宏 = println! + 环形缓冲 tee，喂「本地服务器」日志面板）
 src/core/host_templates.rs # AUTO-GENERATED：官方 h2c 消息序列模板（kcp_capture_parse `export` 从基准 capture 提取）
 src/core/zcompress.rs  # ZCompress 复刻（h2c 传输层压缩，纯算法零依赖；格式权威 = doc/research/scegame-reverse.md §13.8）
@@ -64,6 +67,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 - **自建 host（中继模式，local_host.rs）**：中继经 `debug start --host relay`（CLI）与调试页「host 模式」下拉（GUI）选；**0.5.0 语义切换：`local` 从「中继」改为「真本地」，中继由 `relay` 承接**（旧习惯写 local 跑中继的用户注意）。relay = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 会话抓包平台：c2h 明文 protobuf/cmsg_pack 可直读，h2c=ZCompress 压缩无加密，见 doc/research/scegame-reverse.md §13）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
 - **真本地 host（0.5.0 R3+R4，game_host.rs + lua_host.rs）**：`debug start --host local` / `local play`（本地账号）/ 编辑器 PIE 同口。R3 壳 = 登录/初始化消息群模板 + tick/时钟/探测应答；R4 = mlua lua54 内嵌 VM 跑项目服务端 lua（决策：内嵌 + 磁盘现读零内嵌），0x7006→`base.ui.proto[type]` 路由、`game:ui`/`player:ui`→0x7008 出站、事件泵（游戏-帧 50ms/玩家-连入/断线/按键内建通道 __client_key_down/up）、广播无就绪会话挂起补发、登录应答模板按实际 userid 原位补丁（多账号）。shim 面/踩坑全集 = self-host.md §9.6（**base.clock() 是毫秒**；mlua `Vec<Value>` 传参吞前导 nil 必须 `Variadic::from_iter`；引擎 lua 放行 ≥0x80 标识符需 sanitize_lua 清洗；cmsg_pack 数组判定 = 键恰好 1..=n）。
 - **本地服务器标签页 + 本地账号（0.5.0 R5）**：SQLite 账号库创建/删除；每账号「启动」= 合成凭证（login=1 + token=local-<userid> + token_type=11，零网络零真实凭证）拉起独立客户端连真本地 host；多开 = 多账号各点一次（凭证注入单文件互斥，串行间隔 6s）；host 生命周期 启动/重启/停止 按钮（game_host STOP 信号 + 控制面非阻塞 accept 退出，**accept 后必须 set_nonblocking(false)**——Windows 连接套接字继承监听者非阻塞标志；停止/重启联动 taskkill 本页启动的全部账号客户端）；右栏服务器日志面板（logbus 总线 tee，滚屏/暂停滚屏/关键字筛选）；页级 1s 周期重绘（request_repaint_after），客户端被外部关闭自动感知刷新行状态。CLI：`local account list|create|remove`、`local play --project <路径> --account <名字>...`（常驻承载 host）。
+- **局域网/外网联机 + 在线增量分发（0.6.0，distrib.rs + bin/mini_client.rs）**：本地服务器 = 游戏 host + 分发源。host 起时附带 HTTP 分发服务（端口 = 控制口+80 = 5083）：`/manifest`（staging 清单+xxh64，改代码 bgd 构建后自动重建）+ `/file`（白名单+路径穿越防护）+ `/base_assets`（基座资产 zip 打包下发，**对端零 GitHub token**——引擎走官方 OSS 免鉴权，基座资产 update-info 不分发故由房主发）。**绑定范围三态**（本地 127.0.0.1 默认 / 局域网 / 外网 0.0.0.0，外网提示路由器转发 TCP 5003+UDP 5053+TCP 5083），界面显示局域网 IP。对端 `mini-client.exe`（轻量 eframe 启动器，单文件分发）：输 IP/端口/userid → 异步（mpsc 进度，不卡 UI）引擎就绪检查（缺则 payload 官方 OSS）→ 拉 manifest → 增量比对本地缓存（exe 旁 cache/<项目>/，size+xxh64 双判）→ 只下变化文件 → 写合成凭证（login=1+token=local-<userid>）→ spawn 引擎客户端进局。**LAN 必须 reqwest `.no_proxy()`**（系统代理会拐走局域网请求）。冒烟钩子 `mini-client --connect <ip> <port> <userid>`（无 GUI 直跑连接流程，进度落 stderr）。踩坑：bsdtar 不能写 7z（只读），/base_assets 改打 zip（`tar -xf` 自动识别，payload 解包无需改）。
 
 ## 工具集（examples/，全部 cargo examples）
 

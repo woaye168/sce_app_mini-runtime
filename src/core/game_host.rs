@@ -37,6 +37,8 @@ pub struct GameHostParams {
     pub runtime_dir: PathBuf,
     /// 环境域名（载荷 _m 定位 = <runtime>/Update/<域>/Res/_m；R4 lua host 用）
     pub env_domain: String,
+    /// 控制面绑定地址：127.0.0.1 = 仅本机（默认）；0.0.0.0 = 局域网/外网（远端客户端入局）
+    pub bind_addr: String,
 }
 
 /// 单个游戏会话的编排状态
@@ -262,9 +264,36 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
         let root = upload_root.clone();
         let port = params.port;
         let stop2 = Arc::clone(&ctl_stop);
+        let bind_addr = params.bind_addr.clone();
         std::thread::spawn(move || {
-            if let Err(e) = host_server::run(port, state, root, stop2) {
+            if let Err(e) = host_server::run(port, state, root, stop2, &bind_addr) {
                 crate::srv_log!("[host-ctl] 控制面退出: {e}");
+            }
+        });
+    }
+    // 分发服务线程（TCP 5083 = 控制口 + 80）：把当前 staging 分发给远端客户端（0.6.0 联机）
+    {
+        let stop3 = Arc::clone(&ctl_stop);
+        let runtime_dir = params.runtime_dir.clone();
+        let bind_addr = params.bind_addr.clone();
+        let port = params.port;
+        std::thread::spawn(move || {
+            // staging = <runtime>/User/debug/<项目目录>；取 debug 下第一个子目录（本地服务器单项目约定）
+            let debug_root = runtime_dir.join("User").join("debug");
+            let staging_dir = std::fs::read_dir(&debug_root)
+                .ok()
+                .and_then(|mut it| it.find_map(|e| e.ok().map(|e| e.path()).filter(|p| p.is_dir())));
+            let Some(staging_dir) = staging_dir else {
+                crate::srv_log!("[distrib] 无 staging（未起局过），分发服务未启动");
+                return;
+            };
+            let p = crate::core::distrib::DistribParams {
+                port: port + 80,
+                staging_dir,
+                bind_addr,
+            };
+            if let Err(e) = crate::core::distrib::run(p, stop3) {
+                crate::srv_log!("[distrib] 分发服务退出: {e}");
             }
         });
     }
