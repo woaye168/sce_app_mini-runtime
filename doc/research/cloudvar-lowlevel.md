@@ -267,7 +267,7 @@ PoC 实测（editor-pd，uid 38672742）：读游戏侧写入值 ✓（cloudprob
 - **B 模式（mini-runtime debug 局）客户端完全不连 Entrance**：游戏流量 = **UDP sendto/recvfrom ↔ debug host**（如 106.14.95.227:20400，与 assign_host 同 IP 不同端口）。进程内无任何 Entrance TCP 连接、无 ent_send 帧。
 - 实证（CloudProbe S1-S14 + MessageProbe，场景-加载完成 +20s 触发）：**全部 sce.s 调用无任何回调**（score_init/commit/money_init/rank/list_query/name_search 全黑洞）；仅 message_query 触发本地 5s timeout。客户端参数校验照常工作（签名错误本地即报）。native 日志 `Send stat[entrance_net_stat] failed: send message error` 每 30s 一条 = Entrance 发送层从未就绪。
 - **结论：B 模式不能做云变量游戏态实验**——ScoreArchive 无承载通道。游戏态帧补抓/权限验证必须真 tester 局。
-- 推论价值：B 模式 UDP 协议（KCP 嫌疑，帧头 `4C .. .. .. 51/52` = 'L..Q/R'）逆向 = host 侧云变量（subscribe/publish/world_data）的唯一可见路径（debug host 流量本机可见），工程量大，暂挂。
+- 推论价值（2026-09-02 更新）：B 模式 UDP 协议已破解——标准 KCP（帧头 `4C..51/52` = conv+0x51/0x52 PUSH/ACK）+ CE1 握手族 + 3B 流分帧 + c2h 明文 protobuf/cmsg_pack，且已有本地抓包平台（local_host 中继 `host_capture-*.jsonl` + `examples/kcp_capture_parse.rs`，见 scegame-reverse.md §13）。host 侧云变量消息可直接从中继 c2h 流观测（subscribe/publish/world_data 走 0x7006 cmsg_pack）；h2c 方向为 ZCompress 压缩（无加密），语义可经 VM hook on_ui_message(_new) 旁路。
 - 附 lobby 态 PIE 客户端 TCP 通道样本（误挂收获）：Entrance 长连接在 123.56.153.41:19100（TCP）；帧型 26B 心跳（u32 总长 0x1a + seq u16 递增）、0x40 数据帧、0x41 回包、0x49/0x02/0x01 控制帧；**0x40 载荷无明文标记（固定会话头 + 流加密特征）**；ent_send hook 只见 0x6001 遥测明文——0xA000 走 WSS(TLS)，ws2_32 层只有密文。
 
 ## 8. 自动化进真 tester 局通道（已实证）
@@ -398,7 +398,7 @@ Key 语义：远端**大小写不敏感**，≤180 字符禁空白；部分命�
 
 1. **0x0011 进局通知绑定**：若真局 Entrance 会话的建立帧可复刻，entrance_client 增加「进局绑定」步骤即成全权限直连（最终形态）。需 frida spawn 抓真局首连（themis 绕过是唯一卡点）。当前证据：真局权限 ≈ lobby（仅差局级授权的推测未被证实——实测真局查询类仍 Nopermission，授权是**地图级**而非连接/局级，0x0011 绑定的价值存疑，需重新评估）。
 2. **未取到的子类型号/op 码**：QueryRankTotal/QueryMessage/SetMessage/DeleteMessage/ClientScoreInit、money_cost/list_modify/list_delete/item_use/client_score_set op 码——查询类需地图授权后才能触发（创作者中心开通功能后重测）；committer 未测 op 可按规律推算或在已授权地图补抓。
-3. **服务端独有 API（world_data/subscribe/publish）不可达**：服务端跑在官方远端 host，其 Entrance 流量本机不可见。唯一可见路径 = B 模式 debug host 的 UDP 协议（KCP 嫌疑）逆向，工程量大，暂挂。
+3. **服务端独有 API（world_data/subscribe/publish）不可达**（2026-09-02 更新：路径已通）：服务端跑在官方远端 host，其 Entrance 流量本机不可见。但 B 模式 debug host 的 KCP 会话已可本机抓包解码——local_host 中继全流量 capture + c2h 明文 cmsg_pack 直读（host 侧云变量请求可直接观测），h2c 语义经 VM hook on_ui_message(_new) 旁路（见 scegame-reverse.md §13）。
 4. **2.0 协议同通道验证**（wasicore-03 §4 线索）：2.0 游戏态抓 Entrance 帧（entrance_sniff 复用），对比 1.0 的 0xA000 是否新增 msgid/op；或逆向 GameSparkCore.dll/引擎 provider 层找 op 表。若证实同通道，entrance_client 可扩展支持 2.0 富操作（跨用户事务/列表/名称注册表直连）。
 5. **风控未知**：直连绕过引擎，但 Entrance 是官方客户端协议通道，帐号行为与官方客户端一致；建议低频使用直到摸清计数/风控。读写计费维度：直连只有队列限流（code=25），「每局每分钟 300 读+300 写」未在直连观测到——可在创作者中心云变量后台看调用统计进一步确认。
 6. **探针修正（下轮真局用）**：S10 get_rank_total(map, key, events)（events 在 #3）；S13 item_add(player, key, item_name, count, extra, expire_type, expire_time?)（签名已定版，探针未改）。

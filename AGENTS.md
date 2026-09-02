@@ -32,6 +32,7 @@ src/core/capture.rs    # 游戏窗口截屏（WGC，自验用）
 src/core/locate.rs     # 官方目录推导（项目 tsconfig typeRoots 链）
 src/ui/{auth,debug,settings}.rs  # 标签页（impl App 分散定义）
 examples/              # 研究/维护工具（全部 Rust + 两个 ps1；见下方「工具集」）
+test/temp/             # 原始 dump / 一次性独立小 crate（引用文档须注明路径，期末清理无引用价值的堆积）
 doc/requirements/      # 版本需求文档
 doc/research/          # 逆向研究成果（scegame-reverse.md 为协议/载荷主文档）
 app.json               # 应用市场静态元数据（不含版本；CI 合成 app-release.json）
@@ -50,7 +51,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 - **基座资产**（update-info 不分发：ui/font/regular 字体族、fonts、characters、effect）：本机编辑器兜底复制（tsconfig 推导）→ 否则下载本仓库 release 的 base_assets.7z（**仓库私有，走 GitHub API + token**：env `MINI_RUNTIME_GITHUB_TOKEN` → 凭据管理器 `bgd_sce_tools/github_token`；env `MINI_RUNTIME_BASE_ASSETS_URL` 可覆盖为公开直链）。重新打包：`examples/pack_base_assets.ps1` 后 `gh release upload <tag> --clobber`。
 - **spawn 防卡死**：游戏进程必须用裸 `CreateProcessW(bInheritHandles=FALSE)` 拉起——std Command 会让游戏继承调用方管道句柄，导致管道对端工具等 EOF 卡死到游戏关窗。
 - **B 模式永远带 `-no_update`**：否则 scegame 会自更新并清掉组装好的载荷。
-- **自建 host（中继模式，local_host.rs）**：`debug start --host cloud|local`（CLI）与调试页「host 模式」下拉（GUI）可选，默认云端直连。local = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 逆向抓包平台）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
+- **自建 host（中继模式，local_host.rs）**：`debug start --host cloud|local`（CLI）与调试页「host 模式」下拉（GUI）可选，默认云端直连。local = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 会话抓包平台：c2h 明文 protobuf/cmsg_pack 可直读，h2c=ZCompress 压缩无加密，见 doc/research/scegame-reverse.md §13）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
 
 ## 工具集（examples/，全部 cargo examples）
 

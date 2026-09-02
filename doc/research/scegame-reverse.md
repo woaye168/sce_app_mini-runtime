@@ -287,7 +287,7 @@ D:/sce_online/version-13/SCE -env=game -editor_server_debug -editor_api_version=
 ### 8.5 自托管实现要点（Rust）
 
 1. TCP connect → 发 EditorLogin → 等 0xF001 result=0。
-2. 顺序发文件：≤100KB 用 0xF004，否则 0xF008 按 101400 切块，每文件结束发 0xF00A。ack（0xF010/0xF01A）异步读即可（不等逐文件 ack，编辑器也是流水发送）。
+2. 顺序发文件：≤100KB 用 0xF004，否则 0xF008 按 101400 切块，每文件结束发 0xF00A。ack（0xF010/0xF01A）异步读即可（我方作为上传方不等逐文件 ack，官方 host 容忍流水发送）。**⚠️ 方向注意（2026-09-02 补，editor-patch host_stub 实测）：编辑器作为上传方时在本地连接下逐文件等 0xF010 ack 才发下一个文件**（不回 ack 编辑器静默卡在 update_host）——我方做 host 服务端（0.5.0 R3）必须逐文件回 ack，详见 sce_app_editor-patch/doc/research/editor-debug-channels.md §2。
 3. 发 EditorStartGame（f12 依赖表从项目 libs.json 取：name + version）。
 4. 等 0xF018 result=0 拿 session_id → spawn scegame 客户端（§7 命令行）。
 5. 保持连接可读 NotifyEditorLog = **白拿的服务端日志通道**（0.1.0 可映射到调试 UI 日志页）。
@@ -387,3 +387,53 @@ debug start --project test_res002 --user 38672742 --runtime runtime/
 **终验（C:\mini_dl_test）**：100% 官方通道下载载荷 → debug start → host 服务端全绿（首次加载lua完成/刷怪）→ 客户端 bgd 入口执行 → 截屏文字/BOSS/技能书全渲染。
 
 （待续）
+
+## 13. ★★★ KCP 会话层破解（client↔host 游戏会话，2026-09-02 中继抓包 + VM oracle 实证）
+
+> 抓包平台 = local_host.rs 中继（`host_capture-*.jsonl` 全流量），分析工具 = `examples/kcp_capture_parse.rs`。本节是 §8 控制面之外的**会话面**权威记录。
+
+### 13.1 拓扑与端口规律
+
+- 控制面 TCP 与会话面 UDP/KCP **同主机、端口相差 50（引擎硬编码）**：客户端 `-host_port=5003` 时实际 dial `127.0.0.1:5053`（Network 日志 `KCP will connect to` 实锤）；云端 13738→13788、20770→20820 同规律。
+- KCP 建连是客户端 lua VM 启动的前置闸门：KCP 失败 → `kcp connect failed at 4.010000` → lua-game 日志 0 字节，卡死在进局前。
+
+### 13.2 CE1 握手族（抓包 + 字符串实证）
+
+```
+c→h  CE1SYN    (13B，重发至应答)
+h→c  CE1SYACK  (16B: magic + conv(4 LE 下发) + 4B)
+c→h  CE1ACK    (6B)
+h→c  CE1SYNACK (16B，重发至首个 KCP PUSH)
+```
+
+dll 字符串另有完整控制魔法族（KCPNetwork.cpp 段）：`CE1REP`（连接替换，`[kcp] try replace connection %d %f`）/ `CE1RES`（语义未实证，疑为 reset/resume 类）/ `CE1DISCONNECT` / `CE1TIMEOUT` / `CE1PAUSELOADING` / `CE1PAUSE`。相关 argv：`kcp_stream`（流模式）、`no_kcp`、`kcp_redundant`、`[kcp] %x fec switch %d`（FEC 运行时开关）。
+
+### 13.3 KCP 段与流式分帧
+
+标准 KCP 头（全 LE）：`conv(4) cmd(1) frg(1) wnd(2) ts(4) sn(4) una(4) len(4)` + payload；cmd 0x51=PUSH / 0x52=ACK；每客户端独立递增 conv（0x14/0x15…）。
+`-kcp_stream` 流模式：PUSH payload 拼成字节流，**消息分帧 = 3 字节 LE 长度（含自身）+ 消息体**；流重组须按 sn 排序去重后拼接再分帧（逐段当整帧会错位）。
+
+### 13.4 c2h（客户端→host）= 明文 protobuf
+
+外壳 `f1{ f1 varint msg_type, f2 bytes body }`。已识别：1=登录{f1 userid, f2 "userid" 串, f6 "", f7=1, f8=1}；3=加载进度{f1 递增值 30..100}；5=状态；0x2000=周期心跳{f1 i32, f2 i32}；0x6011=UI 视图同步{f6="main[map_view]>P0>P0" UI 路径, f8 hash}；**0x7006=玩法协议{f2=cmsg_pack}**；0xF100=时钟同步{f1{f1=unix_ms, f2=conv}} + f2 double。
+
+### 13.5 玩法消息体 = cmsg_pack（msgpack 变体）
+
+- VM oracle 实证：`cmsg_pack.pack({type='Req_PlayerList', args={}})` 产出与抓包 c2h 0x7006 内层**逐字节一致**（`82 c4 04 type c4 0e Req_PlayerList c4 04 args 90`）。
+- 格式 = MessagePack 变体：字符串用 bin 家族（0xc4 bin8 等）而非 fixstr/str8。
+- 客户端 lua 收发界面（script-199 common/base/server.lua:184-234）：发送 `base.game:server(type)(args)` = `cmsg_pack.pack({type,args})` → native `game.send_ui_message`；接收 native 回调 `base.event.on_ui_message(str)`（旧）/ `on_ui_message_new(str, type_id, type_name)`（新，**type_id 数字映射表由首次下发的 type_name 建立**）→ `cmsg_pack.unpack(str)` → `proto[type](args)`。
+- h2c 语义层旁路：VM 内 hook 上述两个回调即可拿到全部解码后消息（已实证）。
+
+### 13.6 h2c（host→客户端）传输层 = ZCompress 自研 Huffman 压缩（无加密！）
+
+初判"加密"系误判，证据链：熵 7.36（加密应≈8.0）；首 5 字节 68% 消息相同（每消息内嵌 Huffman 树头）；成对 XOR 长零串（共享明文前缀）；deflate/zlib/lz4/zstd 全解不开；引擎字符串实锤 `ZCompress.cpp` / `ZCompressAdapter.cpp` / `when huffman encoding...` / `rebuild huffman tree finished` / `[Compress(%x)]`（源路径 `D:\BuildPC\NE_pd\Client\src\Game\Network\ZCompress\`）。
+h2c 帧 = `[3B LE 帧长][ZCompress(消息)]`。**无密钥无密码学，只剩位流格式逆向**（两条路：dll 反汇编编解码函数 / 已知明文对照推断）。待验：压缩是否有"不压缩"标志位（FEC 有运行时开关，压缩或有同款）。
+
+### 13.7 分析工具与 oracle 手法
+
+| 工具/手法 | 用途 |
+| --- | --- |
+| `examples/kcp_capture_parse.rs` | host_capture jsonl：stats（握手/conv/cmd 分布）/ flow（PUSH 去重 + wire dump + ASCII 串扫描）；零外部依赖可 rustc 直编 |
+| server 探针（临时 `src/server/api_probe.lua`，已删，结论见 self-host.md §11） | 云端 server VM 内 dump 全局/package.loaded/base.* → log.info → 0xF00C 回读（用后还原） |
+| VM hook `on_ui_message(_new)` | h2c 语义流取证（绕过压缩层） |
+| `cmsg_pack.pack` 已知明文生成 | 与抓包字节对照，推 ZCompress/分帧格式 |

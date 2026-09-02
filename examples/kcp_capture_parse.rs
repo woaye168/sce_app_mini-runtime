@@ -10,7 +10,7 @@
 //!   握手：ASCII 魔法 CE1SYN → CE1SYACK（服务器下发 conv）→ CE1ACK → CE1SYNACK
 //!   KCP 段：conv(4 LE) cmd(1) frg(1) wnd(2 LE) ts(4 LE) sn(4 LE) una(4 LE) len(4 LE) + payload
 //!   cmd：0x51=PUSH 0x52=ACK；payload = 3 字节 LE 长度前缀 + 消息体（-kcp_stream 流式分帧）
-//!   c2h 明文 protobuf（f1{ f1=msg_type, f2=body }）；h2c 加密/混淆（登录后即起，算法未定）
+//!   c2h 明文 protobuf（f1{ f1=msg_type, f2=body }）；h2c = ZCompress 自研 Huffman 压缩（无密钥纯格式，已翻案，详见 scegame-reverse.md §13.6）
 
 use std::collections::HashMap;
 
