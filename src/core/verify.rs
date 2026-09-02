@@ -50,12 +50,13 @@ pub fn service_url(service: &str, _port: u16, env_domain: &str) -> String {
     format!("https://{service}-{env}.tapsce.cn")
 }
 
-/// 代理：环境变量 MINI_RUNTIME_PROXY 优先，否则默认本机 7897（国内网络环境）
+/// 代理：仅显式设置环境变量 MINI_RUNTIME_PROXY 时走代理（星火官方接口是国内 CDN，直连即可）
 pub fn proxy() -> Option<reqwest::Proxy> {
+    // v0.6.1 前默认 127.0.0.1:7897 是开发机便利残留——对端机器没有该代理会导致
+    // 全部官方请求失败"error sending request"
     let url = std::env::var("MINI_RUNTIME_PROXY")
         .ok()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "http://127.0.0.1:7897".to_string());
+        .filter(|s| !s.is_empty())?;
     reqwest::Proxy::all(&url).ok()
 }
 
