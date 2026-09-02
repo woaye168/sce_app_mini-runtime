@@ -426,8 +426,35 @@ dll 字符串另有完整控制魔法族（KCPNetwork.cpp 段）：`CE1REP`（�
 
 ### 13.6 h2c（host→客户端）传输层 = ZCompress 自研 Huffman 压缩（无加密！）
 
-初判"加密"系误判，证据链：熵 7.36（加密应≈8.0）；首 5 字节 68% 消息相同（每消息内嵌 Huffman 树头）；成对 XOR 长零串（共享明文前缀）；deflate/zlib/lz4/zstd 全解不开；引擎字符串实锤 `ZCompress.cpp` / `ZCompressAdapter.cpp` / `when huffman encoding...` / `rebuild huffman tree finished` / `[Compress(%x)]`（源路径 `D:\BuildPC\NE_pd\Client\src\Game\Network\ZCompress\`）。
-h2c 帧 = `[3B LE 帧长][ZCompress(消息)]`。**无密钥无密码学，只剩位流格式逆向**（两条路：dll 反汇编编解码函数 / 已知明文对照推断）。待验：压缩是否有"不压缩"标志位（FEC 有运行时开关，压缩或有同款）。
+初判"加密"系误判，证据链：熵 7.36（加密应≈8.0）；首 5 字节 68% 消息相同（每消息内嵌 Huffman 树头——后查明实为初始树编码的公共前缀）；成对 XOR 长零串（共享明文前缀）；deflate/zlib/lz4/zstd 全解不开；引擎字符串实锤 `ZCompress.cpp` / `ZCompressAdapter.cpp` / `when huffman encoding...` / `rebuild huffman tree finished` / `[Compress(%x)]`（源路径 `D:\BuildPC\NE_pd\Client\src\Game\Network\ZCompress\`）。
+h2c 帧 = `[3B LE 帧长][ZCompress(消息)]`。**无密钥无密码学，只剩位流格式逆向**（两条路：dll 反汇编编解码函数 / 已知明文对照推断）。~~待验：压缩是否有"不压缩"标志位~~ → 已实锤，见 §13.8。
+
+### 13.8 ★★★★ ZCompress 位流格式权威（2026-09-02，R1 完成：Rust 复刻 + 实机 oracle 全量互验）
+
+> 实现 = `src/core/zcompress.rs`（纯算法零依赖）。逆向自 sceengine.dll（version-13 editor 构建）反汇编 + Frida oracle（hook 解码入口记录输入/输出对）双路互证。
+> **验收数据**：① Frida oracle（`test/temp/zc_oracle.py` → `test/temp/zc_oracle.jsonl`）1016/1016 条消息 (输入,输出) 与自研解码逐字节一致（`test/temp/zc_check.rs`）；② 基准 capture `host_capture-1788302184.jsonl` 3781/3781 帧 100% 解码通过（`test/temp/zc_verify.rs`）；③ 新基准 capture `host_capture-1788336006.jsonl` 1026/1026 帧通过。
+
+**帧格式**：`data[0]` 有符号 >= 0（0x00-0x7F）→ **原样模式**，载荷 = `data[1..]`（消息级"不压缩"标志，解压入口 VA 0x181ac0820 实锤：非运行时开关，是逐消息标志字节；无连接级开关）；否则压缩模式，**bit0 = 压缩标志 1**，从位偏移 1 起解码。编码端可直接用原样模式（合法旁路，host 侧 encode 采用）。
+
+**位序**：MSB-first（读 1 位 = `(byte << bit_off) & 0x80`，0x181ae4030；读 n 位同理高位先出，0x180e43130）。越界容错：读 n 位时整字节段字节不足则整段放弃返回已有值；起始即越界返回 0。
+
+**压缩模式 = LZ77 + 自适应 Huffman**（解码主体 0x181ac3d50，连接级有状态对象，**树/环窗状态跨消息持续**）：
+
+- 字母表 291 = `0x123` 符号：`0x00-0xFF` 字面量；`0x100-0x121` 长度；`0x122` END（消息结束标记）。
+- 长度与距离共享字母表：读完长度符号后，下一符号按距离解释。
+  - 长度 = `extra(sym - 0x100) + 3`
+  - 距离：sym < 0x100 → `sym + 9`；0x100 <= sym < 0x108 → `sym - 0xFF`（即距离 1-8）；>= 0x108 → `extra(sym - 0x100) + 0x100`
+  - `extra(c)`（0x181ac4040）：c < 8 → c；否则 `e = (c>>1) - 3`，**流内剩余位 < e 时容错返回 c**，否则 `read_bits(e) + (1<<(e+1)) + ((c&1)<<e) + 4`。（值域：c=8,9 → 8-11；c=10,11 → 12-19；… c=33 → 24580-32774）
+- LZ77 环窗 0x8102 = 33026 字节（内联在解码对象头部）。窗口绝对位置簿记：`f8110`（写入计数，封顶 0x8102）/`f8118`（环内最旧字节绝对位置）/`f8104`（环满时缓存写位置）；读位置 < 窗口基址时读 0（不报错），环索引越界置错误标志。精确状态机见 zcompress.rs `emit`/match-copy（逐指令镜像）。
+- 树走读（0x181ac40c0）：节点 16B `{weight i32, sym u16, child[2] i32}`（叶子 child0 == -1），从根逐位下钻 child[bit]；位流耗尽置错误标志返回 0。
+- **自适应策略（0x181ac4b40，每消息解码后执行）**：该消息全部符号（含 END）权重 +1（某符号权重达 0x7FFFFFFF 时本批整体回滚并永久停更）；然后若本消息输出字节数 > 100 且（重建计数 < 2000 或输出 > 1000）→ 全量重建树。
+- **建树（0x181ac4660）**：291 叶子（weight = 权重数组值）入桶式优先队列（按权重升序，同权重 FIFO，合并节点进桶尾）；反复弹两个最小者合并为新内部节点（child0 = 先弹出者 = 位 0 侧），直至剩一根。初始权重全 1（对象构造时初始化 + 重建，0x181ac4180）。节点容量 0x247。错误路径：解码错误（位流耗尽/距离异常/环越界）→ 状态冻结（不做权重更新/重建）。
+
+**KCP 数据报批包（重要，0.4.0 抓包解析器的坑）**：host 侧会把多个 KCP 段合并进一个 UDP 数据报（实证：95B 数据报 = ACK + ACK + PUSH）。解析器必须在一个数据报内按 `24B 头 + len` 逐段迭代，否则丢段。旧分析"首消息丢失/丢包"实为此解析缺陷，中继抓包本身无损。
+
+**encode 侧**：host 引擎编码器不在客户端 dll（无从反汇编）；但解码格式已完全确定，合法编码 = 任选 LZ77 解析 + 相同自适应规则的 Huffman 发射，或直接用原样模式旁路。0.5.0 采用原样模式（`encode_frame_raw` = `0x00 + 明文`），引擎侧终验路径：自研 host 发包 → 真客户端解码 → hook `on_ui_message` 对账（R3 收口）。
+
+**Frida oracle 手法（复用价值高）**：hook `SCEEngine.dll` RVA 0x1ac4ab0（解码入口），onEnter 读 reader（`[rdx]=base [rdx+8]=end`）取输入，onLeave 读输出向量（`[r8]=count [r8+8]=base`）取明文。脚本 `test/temp/zc_oracle.py`，对账器 `test/temp/zc_check.rs`。
 
 ### 13.7 分析工具与 oracle 手法
 

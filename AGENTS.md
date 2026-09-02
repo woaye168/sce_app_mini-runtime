@@ -25,6 +25,7 @@ src/core/verify.rs     # 凭证校验
 src/core/runtimes.rs   # 运行时切换架子（RuntimeKind：编辑器-api/对战平台测试/正式；引擎包/spawn 目标/env 域）
 src/core/host.rs       # 调试 host 控制协议（EditorLogin/上传/起局/host 日志，手写 protobuf wire）
 src/core/local_host.rs # 自建 host（中继模式）：TCP 控制面中继 + UDP KCP NAT（会话端口=控制端口+50）+ 全流量 capture
+src/core/zcompress.rs  # ZCompress 复刻（h2c 传输层压缩，纯算法零依赖；格式权威 = doc/research/scegame-reverse.md §13.8）
 src/core/payload.rs    # 载荷同步：update-info + OSS 下载 + TNND/UPAK 落位 + 注册表合成 + 基座资产
 src/core/staging.rs    # 调试 staging 生成（白名单拷贝 + ui/script/main.lua 包装）
 src/core/debug.rs      # B 模式编排：assign_host → 上传 → 起局 → spawn（CreateProcessW 防管道继承）

@@ -11,6 +11,7 @@ pub mod payload;
 pub mod runtimes;
 pub mod staging;
 pub mod verify;
+pub mod zcompress;
 
 /// 路径显示统一为正斜杠（用户约定：本应用所有路径展示一律用 /）
 pub fn disp(path: &std::path::Path) -> String {

@@ -143,7 +143,7 @@ h→c  CE1SYNACK (16B: magic + conv + 00 00 00，重发至首个 PUSH)
 | 职责 | 依据 | 复刻难度 |
 | --- | --- | --- |
 | KCP 会话服务（CE1 握手/conv/重传/流分帧） | §10，标准 KCP + 3B 前缀 | 低（协议已明） |
-| h2c 传输层 ZCompress 压缩格式 | §10 ⑤（无密钥，自研 Huffman） | 中（纯格式逆向，有 dll 反汇编+已知明文两条路） |
+| h2c 传输层 ZCompress 压缩格式 | §10 ⑤（无密钥，自研 Huffman） | ~~中（纯格式逆向，有 dll 反汇编+已知明文两条路）~~ **✅ 已复刻**（scegame-reverse.md §13.8，`src/core/zcompress.rs`，oracle/基准 capture 全量互验） |
 | 控制面服务端（上传接收/起局/日志回传 0xF00C） | scegame-reverse.md §8，客户端侧已实现 | 中（镜像实现） |
 | 地图加载编排（load_scene/init 链/obj 数编注入） | base.game.load_scene + package.loaded 结构 | 中（需逆向 GameHost.lua 行为，可经中继 0xF00C 全日志观察） |
 | 消息路由（0x7006 → base.game.message/ui → 服务端 lua 回调） | c2h 明文 + base.game.message/ui 函数点 | 中 |
@@ -154,6 +154,6 @@ h→c  CE1SYNACK (16B: magic + conv + 00 00 00，重发至首个 PUSH)
 
 ## 12. 遗留研究项
 
-- ~~KCP 会话协议抓包~~（§10 已完成一轮）；~~h2c "加密"~~（§10 ⑤ 翻案 = ZCompress 压缩）：下一步 = ZCompress 位流格式逆向（树头序列化布局/位序/符号表），两条路：① dll 反汇编 `ZCompress.cpp` 编解码函数（无密钥纯格式）；② 已知明文推断（VM 内 `cmsg_pack.pack` 造明文 → 经中继抓压缩后字节对照）。顺带验证"不压缩标志位"是否存在。
+- ~~KCP 会话协议抓包~~（§10 已完成一轮）；~~h2c "加密"~~（§10 ⑤ 翻案 = ZCompress 压缩）：~~下一步 = ZCompress 位流格式逆向~~（**2026-09-02 已完成**：Rust 复刻 + Frida oracle 1016/1016 + 基准 capture 3781/3781 全量互验，格式权威见 scegame-reverse.md §13.8；"不压缩开关"真伪 = 存在消息级原样标志（首字节 < 0x80 → data[1..]），无连接级开关）。顺带实锤：host 会把多个 KCP 段合并进一个 UDP 数据报，解析须逐段迭代（旧 capture 分析工具已修）。
 - `scegame-reverse.md` ack 时序记录与本地实测的关系已调和（§8.5 ⚠️ 注解：我方上传方流水发送 vs 编辑器上传方本地逐文件等 0xF010 ack）；遗留 = 云端高延迟下官方 host 是否真容忍流水发送的实证。
 - 手机调试场景 host_token 是否校验（editor-debug-channels.md §4.3 登记）。
