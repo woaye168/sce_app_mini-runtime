@@ -7,6 +7,9 @@ use std::path::PathBuf;
 
 impl crate::App {
     pub(crate) fn ui_local_server(&mut self, ui: &mut egui::Ui) {
+        // 周期重绘：客户端被外部关闭（直接关游戏窗口）时无需交互即可感知并刷新行状态
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_secs(1));
         // 拉取服务器日志总线新行（暂停滚屏 = 只冻结自动滚屏，日志照收）
         let (seq, lines) = crate::core::logbus::fetch_after(self.ls_log_seq);
         self.ls_log_seq = seq;
@@ -69,6 +72,7 @@ impl crate::App {
             }
             if host_running && ui.button("重启 host").clicked() {
                 crate::core::game_host::stop_running();
+                stop_all_clients(self);
                 std::thread::spawn(|| {
                     // 等旧实例退出（主循环 5ms 一拍 + 控制面 100ms 一轮）
                     for _ in 0..50 {
@@ -82,6 +86,7 @@ impl crate::App {
             }
             if host_running && ui.button("停止 host").clicked() {
                 crate::core::game_host::stop_running();
+                stop_all_clients(self);
             }
         });
         ui.horizontal(|ui| {
@@ -240,6 +245,14 @@ fn kill_pid(pid: u32) {
     let _ = crate::core::silent_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .status();
+}
+
+/// 停掉本页启动的全部账号客户端（停止/重启 host 时联动——host 没了客户端留着也是断线尸体）
+fn stop_all_clients(app: &mut crate::App) {
+    let pids: Vec<u32> = app.ls_clients.drain().map(|(_, pid)| pid).collect();
+    for pid in pids {
+        kill_pid(pid);
+    }
 }
 
 /// 账号 id → 客户端 pid 表类型别名（main.rs App 字段用）

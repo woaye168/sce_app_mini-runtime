@@ -143,6 +143,7 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **踩坑②（2026-09-03，v0.5.0 多人 bug）**：**0x7008 的 f2 seq 与 f4 type_name 首现都是会话级状态**——客户端按连接维护 type_id↔名字映射表（§13.5 on_ui_message_new）。v0.5.0 错按全局首现/全局 seq，第三个客户端起收不到 f4 名字映射 → 玩法下发全丢（表现：第三人看不到任何玩家，Req_PlayerList 狂重试）。修复：seq/seen_types 移入 SessionBrain，广播按会话各自组帧，pending_broadcast 改存裸载荷（type_id, name, args）补发时按会话组帧。复验：三客户端 Req_PlayerList 各仅 1 次（修前第三人 5+ 次重试）。
 - **踩坑③（2026-09-03）**：local_play 每个账号启动都重建 staging，局运行中客户端正占用 staging 文件 → 第三人起 staging::create 撞文件锁（os error 32）。修复：staging 只在局未起时生成，后续账号复用本局目录；合成凭证注入加 sharing 冲突重试（20×500ms）。
 - **服务器日志面板（0.5.1）**：`core/logbus.rs` 总线（`srv_log!` 宏 = println! + 5000 行环形缓冲 tee），game_host/host_server/lua_host 全部 stdout 日志进总线；「本地服务器」页右栏日志面板（滚屏/暂停滚屏 = 只冻结自动滚动照收新行、关键字筛选、清空）。
+- **host 停止联动（0.5.2）**：停止/重启 host 联动 taskkill 本页启动的全部账号客户端；页级 1s `request_repaint_after` 周期重绘——客户端被外部直接关窗时行状态自动回落（此前 egui 无交互不重绘，tasklist 探活永不执行）。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 
