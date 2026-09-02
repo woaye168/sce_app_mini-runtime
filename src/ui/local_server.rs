@@ -41,7 +41,10 @@ impl crate::App {
             }
         });
         let filter = self.ls_log_filter.trim().to_string();
-        egui::ScrollArea::vertical()
+        // 限定在列宽内（否则 ScrollArea 撑爆溢出盖住左栏按钮）
+        let w = ui.available_width();
+        egui::ScrollArea::both() // 横向也滚：日志整行不换行（换行会两端对齐把字拉开）
+            .max_width(w)
             .auto_shrink([false, false])
             .stick_to_bottom(self.ls_log_scroll)
             .show(ui, |ui| {
@@ -49,9 +52,9 @@ impl crate::App {
                     if !filter.is_empty() && !line.contains(&filter) {
                         continue;
                     }
-                    // 不用 monospace：等宽字体无中文字形，中文回退后中英混排逐字分散（[ h o s t…]）。
-                    // 用正文比例字体（appsdk 壳已加载中文字体），小字号保持日志密度
-                    ui.label(egui::RichText::new(line).size(12.0));
+                    // 不换行（label 默认 wrap 会在宽度不足时两端对齐逐字拉开）；
+                    // 正文比例字体（appsdk 壳已装中文字体），小字号保密度
+                    ui.add(egui::Label::new(egui::RichText::new(line).size(12.0)).wrap_mode(egui::TextWrapMode::Extend));
                 }
             });
     }
@@ -122,6 +125,20 @@ impl crate::App {
             if game.is_some() && ui.button("停止本局").clicked() {
                 sce_app_mini_runtime::core::local_play::stop_game();
                 // 停局后 host 可接下一局（客户端各自断开）
+            }
+        });
+        ui.separator();
+
+        // 联机分发：mini-client.exe 定位（发给朋友的对端启动器）
+        ui.horizontal(|ui| {
+            ui.label("联机：把 mini-client.exe 发给朋友，对方输你的 IP/端口/userid 即可下载并进局");
+            if ui.button("打开启动器目录").clicked() {
+                // exe 旁应有 mini-client.exe（应用市场安装后同目录；开发期在 target/<profile>/）
+                if let Ok(exe) = std::env::current_exe() {
+                    if let Some(dir) = exe.parent() {
+                        let _ = crate::core::silent_command("explorer").arg(dir).status();
+                    }
+                }
             }
         });
         ui.separator();
