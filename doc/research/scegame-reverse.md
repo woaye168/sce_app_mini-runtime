@@ -485,7 +485,7 @@ h2c 帧 = `[3B LE 帧长][ZCompress(消息)]`。**无密钥无密码学，只剩
 | 0x31007 | **服务器 tick 驱动** | `{f1: 递增计数}` | ~200ms 周期，最高频（748 次/局）——驱动客户端 `base.event.on_update` 族 |
 | 0x1108 | 0x1001 的应答 | 50B | 成对 |
 | 0xf101 | 时钟同步应答 | | 与 0xF100 成对 |
-| 0x7008 | **玩法下发（UI 消息通道）** | `{f1: cmsg_pack args（map）, f2: seq 序号, f3: type_id, f4: type_name（仅该 type_id 首次出现携带）}` | = 客户端 `on_ui_message_new(str=f1, type_id=f3, type_name=f4)` 的线格式；Sync_*/S2C_* 全走这里 |
+| 0x7008 | **玩法下发（UI 消息通道）** | `{f1: cmsg_pack args（map）, f2: seq 序号, f3: type_id, f4: type_name（**每会话**首现携带）}` | = 客户端 `on_ui_message_new(str=f1, type_id=f3, type_name=f4)` 的线格式；Sync_*/S2C_* 全走这里。**f2 seq 与 f4 首现都是会话级状态**：客户端按连接维护 type_id↔名字映射表（§13.5），会话级 seq 保序由 KCP 兜底。0.5.0 曾错按全局首现/全局 seq，导致第三个客户端起收不到名字映射丢全部玩法下发（v0.5.1 修） |
 | 0x6 / 0x100 / 0x109 | 空 body 控制消息 | | 进图期各 1 次 |
 | 0x102 | `{f1=0, f2={f1=userid, f2="", f3=0, f4=1}}` | ×2 | 进图期 |
 | 0x112 / 0x1105 / 0x1120 / 0x103 | 进图大消息（1403B/1254B/811B/476B） | 场景/单位全量初始化 | |

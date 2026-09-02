@@ -44,11 +44,22 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
     })?;
     log(format!("本地 host 已就绪: 127.0.0.1:{port}"));
 
-    // staging 一次生成（上传与 -map_path 共用）
-    let staging_dir = crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
+    let dir_name = params
+        .project_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| project_name.clone());
+    // staging 只在局未起时生成：局运行中客户端正占用 staging 内文件（os error 32 文件锁），
+    // 后续账号直接复用本局已上传的 staging 目录
+    let staging_dir = params
+        .runtime_dir
+        .join("User")
+        .join("debug")
+        .join(&dir_name);
 
-    // ② 局：未起则控制面上传 + 起局
+    // ② 局：未起则生成 staging + 控制面上传 + 起局
     if game_active().is_none() {
+        let staging_dir = crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
         log("局未起，控制连接上传项目...".into());
         let mut ctl = crate::core::host::HostControl::connect(
             &crate::core::host::HostInfo {
@@ -72,21 +83,32 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
         *GAME_CTL.lock().unwrap() = Some(ctl);
     }
 
-    // ③ 合成凭证注入（单文件互斥：调用方负责间隔）
+    // ③ 合成凭证注入（单文件互斥：调用方负责间隔；客户端可能仍持读句柄， sharing 冲突重试）
     let user_info_path = params
         .runtime_dir
         .join("User")
         .join(format!("user_info-{}.json", params.env_domain));
-    crate::core::auth::write_user_info(&user_info_path, &crate::core::local_accounts::synth_user_info(&params.account))?;
+    let info = crate::core::local_accounts::synth_user_info(&params.account);
+    let mut last_err = None;
+    for _ in 0..20 {
+        match crate::core::auth::write_user_info(&user_info_path, &info) {
+            Ok(_) => {
+                last_err = None;
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+    }
+    if let Some(e) = last_err {
+        return Err(e);
+    }
 
     // ④ spawn 客户端
     let kind = crate::core::runtimes::RuntimeKind::EditorApi(api_version);
     let exe = kind.client_exe(&params.runtime_dir);
-    let dir_name = params
-        .project_root
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| project_name.clone());
     let args = crate::core::debug::build_client_args(
         "127.0.0.1",
         port,

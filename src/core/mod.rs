@@ -7,6 +7,7 @@ pub mod host;
 pub mod local_accounts;
 pub mod local_host;
 pub mod local_play;
+pub mod logbus;
 pub mod game_host;
 pub mod host_server;
 pub mod host_templates;

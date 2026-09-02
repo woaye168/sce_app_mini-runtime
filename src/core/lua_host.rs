@@ -65,10 +65,9 @@ struct Inner {
     events: HashMap<String, Vec<Handler>>,
     /// 玩家表：uid → （昵称， 注册表键指向 player 表）
     players: HashMap<i64, (String, RegistryKey)>,
-    /// 0x7008 type_id 分配（官方从 5 起）
+    /// 0x7008 type_id 分配（官方从 5 起；id 全局一致，f4 名字按会话首现由 game_host 侧判定）
     type_ids: HashMap<String, u32>,
     next_type_id: u32,
-    seq: u64,
     started: Instant,
     tasks: Vec<Task>,
     /// 数编缓存（eff.init_cache 填充）：'$$id' → CVal
@@ -91,7 +90,7 @@ pub struct LuaBrain {
 
 /// 包解析失败时的容错桩（记录并返回空表）——加载期宽容策略
 fn stub_module(lua: &Lua, name: &str) -> LuaResult<Table> {
-    println!("[lua-host] 包缺失容错桩: {name}");
+    crate::srv_log!("[lua-host] 包缺失容错桩: {name}");
     lua.create_table()
 }
 
@@ -119,7 +118,6 @@ impl LuaBrain {
             players: HashMap::new(),
             type_ids: HashMap::new(),
             next_type_id: 5,
-            seq: 0,
             started: Instant::now(),
             tasks: Vec::new(),
             data_cache: HashMap::new(),
@@ -150,7 +148,7 @@ impl LuaBrain {
             .set_name(&name)
             .exec()
             .map_err(|e| mlua::Error::runtime(format!("服务端 main.lua 执行失败: {e}")))?;
-        println!("[lua-host] 服务端 lua 加载链完成");
+        crate::srv_log!("[lua-host] 服务端 lua 加载链完成");
         Ok(brain)
     }
 
@@ -164,23 +162,16 @@ impl LuaBrain {
         self.inner.borrow_mut().logs.drain(..).collect()
     }
 
-    /// 0x7008 序号与 type_id 分配
-    pub fn alloc_seq(&self) -> u64 {
-        let mut g = self.inner.borrow_mut();
-        g.seq += 1;
-        g.seq
-    }
-
-    /// type_id：首次分配并返回是否需要携带名字
-    pub fn type_id_of(&self, name: &str) -> (u32, bool) {
+    /// type_id 分配（id 全局一致；f4 是否带名字 = 每会话首现，由 game_host 侧会话状态判定）
+    pub fn type_id_of(&self, name: &str) -> u32 {
         let mut g = self.inner.borrow_mut();
         if let Some(&id) = g.type_ids.get(name) {
-            (id, false)
+            id
         } else {
             let id = g.next_type_id;
             g.next_type_id += 1;
             g.type_ids.insert(name.to_string(), id);
-            (id, true)
+            id
         }
     }
 
@@ -404,7 +395,7 @@ impl LuaBrain {
     // ================= 全局环境 =================
 
     fn log_line(&self, level: &str, text: &str) {
-        println!("[lua] {text}");
+        crate::srv_log!("[lua] {text}");
         push_log_inner(&self.inner, level, text);
     }
 
@@ -462,7 +453,7 @@ impl LuaBrain {
                         })
                         .collect::<Vec<_>>()
                         .join("\t");
-                    println!("[lua] {text}");
+                    crate::srv_log!("[lua] {text}");
                     push_log_inner(&inner, &lv, &text);
                     Ok(())
                 })?,
@@ -486,7 +477,7 @@ impl LuaBrain {
                         })
                         .collect::<Vec<_>>()
                         .join("\t");
-                    println!("[lua] {text}");
+                    crate::srv_log!("[lua] {text}");
                     push_log_inner(&inner, "info", &text);
                     Ok(())
                 })?,
@@ -905,7 +896,7 @@ impl LuaBrain {
                         Value::String(s) => s.to_string_lossy(),
                         other => format!("{other:?}"),
                     };
-                    println!("[lua-host] base.{name} 未 shim（容错空函数）");
+                    crate::srv_log!("[lua-host] base.{name} 未 shim（容错空函数）");
                     let _ = &inner; // 占位（预留计数）
                     lua.create_function(|_, _: mlua::Variadic<Value>| Ok(Value::Nil))
                 })?,
@@ -980,7 +971,7 @@ impl LuaBrain {
                 }
             }
         }
-        println!("[lua-host] 数编缓存: {count} 条（obj 树 {} 文件）", count_files(&self.script_root.join("obj")));
+        crate::srv_log!("[lua-host] 数编缓存: {count} 条（obj 树 {} 文件）", count_files(&self.script_root.join("obj")));
         self.inner.borrow_mut().cache_inited = true;
     }
 }
@@ -1182,7 +1173,7 @@ fn rand_range(a: i64, b: i64) -> i64 {
 fn require_folder(lua: &Lua, script_root: &Path, name: &str) -> LuaResult<Value> {
     let dir = script_root.join(name.replace('.', std::path::MAIN_SEPARATOR_STR));
     if !dir.is_dir() {
-        println!("[lua-host] require_folder 目录不存在: {name}（容错空转）");
+        crate::srv_log!("[lua-host] require_folder 目录不存在: {name}（容错空转）");
         return Ok(Value::Nil);
     }
     let mut files = Vec::new();

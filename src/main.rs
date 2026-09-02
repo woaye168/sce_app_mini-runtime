@@ -713,6 +713,11 @@ struct App {
     ls_new_name: String,
     ls_clients: ui::local_server::ClientMap,
     ls_launch_rx: Option<std::sync::mpsc::Receiver<Result<(i64, u32), String>>>,
+    /// 本地服务器日志面板：缓冲（logbus 拉取）/ 已消费序号 / 滚屏开关 / 关键字筛选
+    ls_logs: std::collections::VecDeque<String>,
+    ls_log_seq: u64,
+    ls_log_scroll: bool,
+    ls_log_filter: String,
     /// 启动前自动 payload sync 的进度
     debug_progress_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
@@ -747,6 +752,10 @@ impl Default for App {
             ls_new_name: String::new(),
             ls_clients: Default::default(),
             ls_launch_rx: None,
+            ls_logs: Default::default(),
+            ls_log_seq: 0,
+            ls_log_scroll: true,
+            ls_log_filter: String::new(),
             debug_progress_rx: None,
         }
     }

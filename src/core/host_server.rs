@@ -158,7 +158,7 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
     }
     let userid = host::body_varint(&parsed.body, 1).unwrap_or(0);
     let token = host::body_string(&parsed.body, 2).unwrap_or_default();
-    println!("[host-ctl] EditorLogin: userid={userid} token={token}（本地放行）");
+    crate::srv_log!("[host-ctl] EditorLogin: userid={userid} token={token}（本地放行）");
     let mut body = Vec::new();
     host::put_field_varint(&mut body, 1, 0);
     host::put_field_varint(&mut body, 2, 0);
@@ -192,7 +192,7 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                         pending: HashMap::new(),
                     });
                     let _ = std::fs::remove_dir_all(upload_root.join(&proj));
-                    println!("[host-ctl] 上传开始: {proj} → {}", crate::core::disp(&upload_root.join(&proj)));
+                    crate::srv_log!("[host-ctl] 上传开始: {proj} → {}", crate::core::disp(&upload_root.join(&proj)));
                 }
                 let Some(ux) = &mut upload else { continue };
                 // f3 内容：无内容 = 大文件空声明（host 据此创建文件）或增量跳过
@@ -305,7 +305,7 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0)
                     | 0x1000_0000_0000_0000; // 高位标记，避免与官方 id 混淆
-                println!("[host-ctl] EditorStartGame: {proj} → session {session_id}（依赖库 {} 个）", libs.len());
+                crate::srv_log!("[host-ctl] EditorStartGame: {proj} → session {session_id}（依赖库 {} 个）", libs.len());
                 {
                     let mut g = state.lock().unwrap();
                     g.game = Some(GameInfo {
@@ -322,14 +322,14 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                 send(&mut s, host::MSG_EDITOR_START_GAME_RES, &b)?;
             }
             host::MSG_DESTROY_GAME => {
-                println!("[host-ctl] 收到销毁通知（0xF01B），停局");
+                crate::srv_log!("[host-ctl] 收到销毁通知（0xF01B），停局");
                 let mut g = state.lock().unwrap();
                 g.game = None;
                 g.teardown = true;
             }
             host::MSG_EDITOR_HEARTBEAT => {} // 编辑器心跳：安全忽略
             other => {
-                println!("[host-ctl] 未识别消息 {other:#x}（忽略）");
+                crate::srv_log!("[host-ctl] 未识别消息 {other:#x}（忽略）");
             }
         }
     }
@@ -344,7 +344,7 @@ pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sy
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr).map_err(|e| anyhow!("控制面监听失败 {addr}: {e}"))?;
     listener.set_nonblocking(true)?;
-    println!("[host-ctl] 控制面已监听 {addr}");
+    crate::srv_log!("[host-ctl] 控制面已监听 {addr}");
     let _ = std::fs::create_dir_all(&upload_root);
     while !stop.load(std::sync::atomic::Ordering::Relaxed) {
         match listener.accept() {
@@ -352,23 +352,23 @@ pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sy
                 // Windows 下 accept 的套接字会继承 listener 的 nonblocking 标志，
                 // 必须显式还原为阻塞模式，否则 handle_conn 读帧即 10035 WSAEWOULDBLOCK 断连
                 if let Err(e) = stream.set_nonblocking(false) {
-                    println!("[host-ctl] 还原阻塞模式失败: {e}");
+                    crate::srv_log!("[host-ctl] 还原阻塞模式失败: {e}");
                     continue;
                 }
                 let state = Arc::clone(&state);
                 let root = upload_root.clone();
                 std::thread::spawn(move || {
                     if let Err(e) = handle_conn(stream, state, root) {
-                        println!("[host-ctl] 连接结束: {e}");
+                        crate::srv_log!("[host-ctl] 连接结束: {e}");
                     }
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(std::time::Duration::from_millis(100));
             }
-            Err(e) => println!("[host-ctl] accept 失败: {e}"),
+            Err(e) => crate::srv_log!("[host-ctl] accept 失败: {e}"),
         }
     }
-    println!("[host-ctl] 控制面已停止 {addr}");
+    crate::srv_log!("[host-ctl] 控制面已停止 {addr}");
     Ok(())
 }

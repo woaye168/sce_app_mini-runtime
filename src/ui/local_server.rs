@@ -7,6 +7,52 @@ use std::path::PathBuf;
 
 impl crate::App {
     pub(crate) fn ui_local_server(&mut self, ui: &mut egui::Ui) {
+        // 拉取服务器日志总线新行（暂停滚屏 = 只冻结自动滚屏，日志照收）
+        let (seq, lines) = crate::core::logbus::fetch_after(self.ls_log_seq);
+        self.ls_log_seq = seq;
+        for l in lines {
+            if self.ls_logs.len() >= 5000 {
+                self.ls_logs.pop_front();
+            }
+            self.ls_logs.push_back(l);
+        }
+
+        // 左栏 = 控制/账号，右栏 = 服务器日志面板
+        ui.columns(2, |cols| {
+            self.ui_local_server_left(&mut cols[0]);
+            self.ui_local_server_logs(&mut cols[1]);
+        });
+    }
+
+    /// 右栏：服务器日志面板（滚屏/暂停滚屏 + 关键字筛选）
+    fn ui_local_server_logs(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            let label = if self.ls_log_scroll { "暂停滚屏" } else { "滚屏" };
+            if ui.button(label).clicked() {
+                self.ls_log_scroll = !self.ls_log_scroll;
+            }
+            ui.label("关键字:");
+            ui.text_edit_singleline(&mut self.ls_log_filter);
+            if ui.button("清空").clicked() {
+                self.ls_logs.clear();
+            }
+        });
+        let filter = self.ls_log_filter.trim().to_string();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .stick_to_bottom(self.ls_log_scroll)
+            .show(ui, |ui| {
+                for line in &self.ls_logs {
+                    if !filter.is_empty() && !line.contains(&filter) {
+                        continue;
+                    }
+                    ui.monospace(line);
+                }
+            });
+    }
+
+    /// 左栏：host 生命周期 + 局状态 + 账号管理
+    fn ui_local_server_left(&mut self, ui: &mut egui::Ui) {
         // 状态刷新：账号列表（首次/有变更标记时重载）
         if self.ls_need_reload {
             self.ls_accounts = crate::core::local_accounts::list().unwrap_or_default();
@@ -133,7 +179,7 @@ impl crate::App {
                             env_domain,
                             account: acc,
                         },
-                        &mut |msg| println!("[local-server] {msg}"),
+                        &mut |msg| crate::core::logbus::push(format!("[local-server] {msg}")),
                     )
                     .map(|pid| (acc_id, pid))
                     .map_err(|e| e.to_string());

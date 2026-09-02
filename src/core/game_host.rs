@@ -47,6 +47,11 @@ struct SessionBrain {
     burst_done: bool,
     tick_counter: u32,
     last_tick: Instant,
+    /// 0x7008 出站序号（**每会话独立**：KCP 已保序，seq 是应用级会话内序号）
+    seq: u64,
+    /// 本会话已见过的 type_id（f4 type_name 按会话首现携带——客户端的 type_id↔名字映射表
+    /// 由本会话首次下发建立，§13.9；全局首现是 v0.5.0 bug：第三人起收不到名字映射丢消息）
+    seen_types: std::collections::HashSet<u32>,
 }
 
 impl SessionBrain {
@@ -58,6 +63,8 @@ impl SessionBrain {
             burst_done: false,
             tick_counter: 0,
             last_tick: Instant::now(),
+            seq: 0,
+            seen_types: std::collections::HashSet::new(),
         }
     }
 }
@@ -115,26 +122,31 @@ fn send_burst(kcp: &mut KcpServer, conv: u32, lua_active: bool, userid: u64) {
     }
 }
 
-/// lua 出站 → 0x7008 {f1 cmsg(args), f2 seq, f3 type_id, f4 type_name（首现携带）}（线格式 §13.9）
-/// 广播时无已进图会话 → 进 pending 队列（官方语义：后进玩家也拿到世界状态——BOSS 5s 首刷早于客户端
-/// 接入会永久隐身，test_res002 实测；队列上限 2000 防爆内存，溢出丢最旧）
-fn send_lua_out(
-    kcp: &mut KcpServer,
-    brains: &std::collections::HashMap<u32, SessionBrain>,
-    b: &LuaBrain,
-    m: &crate::core::lua_host::OutMsg,
-    pending_broadcast: &mut std::collections::VecDeque<Vec<u8>>,
-) {
-    let (type_id, first) = b.type_id_of(&m.type_name);
-    let seq = b.alloc_seq();
+/// lua 出站 → 0x7008 {f1 cmsg(args), f2 seq, f3 type_id, f4 type_name（**每会话**首现携带）}（线格式 §13.9）
+/// seq 与 f4 首现判定都是会话级状态（客户端按连接维护 type_id↔名字映射表）。
+/// 广播时无已进图会话 → 进 pending 队列存裸载荷（官方语义：后进玩家也拿到世界状态——BOSS 5s 首刷早于客户端
+/// 接入会永久隐身，test_res002 实测；队列上限 2000 防爆内存，溢出丢最旧；补发时按会话各自组帧）
+fn build_ui_frame(br: &mut SessionBrain, type_id: u32, type_name: &str, args: &[u8]) -> Vec<u8> {
+    br.seq += 1;
+    let first = br.seen_types.insert(type_id);
     let mut body = Vec::new();
-    host::put_field_bytes(&mut body, 1, &m.args);
-    host::put_field_varint(&mut body, 2, seq);
+    host::put_field_bytes(&mut body, 1, args);
+    host::put_field_varint(&mut body, 2, br.seq);
     host::put_field_varint(&mut body, 3, type_id as u64);
     if first {
-        host::put_field_bytes(&mut body, 4, m.type_name.as_bytes());
+        host::put_field_bytes(&mut body, 4, type_name.as_bytes());
     }
-    let frame = build_message(0x7008, &body);
+    build_message(0x7008, &body)
+}
+
+fn send_lua_out(
+    kcp: &mut KcpServer,
+    brains: &mut std::collections::HashMap<u32, SessionBrain>,
+    b: &LuaBrain,
+    m: &crate::core::lua_host::OutMsg,
+    pending_broadcast: &mut std::collections::VecDeque<(u32, String, Vec<u8>)>,
+) {
+    let type_id = b.type_id_of(&m.type_name);
     // 出站首现类型打点（排障用：确认消息离站 + 载荷预览）
     {
         use std::sync::OnceLock;
@@ -144,15 +156,16 @@ fn send_lua_out(
             let preview = crate::core::cmsg_pack::unpack(&m.args)
                 .map(|(v, _)| crate::core::cmsg_pack::debug_short(&v))
                 .unwrap_or_else(|| "<非 cmsg>".into());
-            println!("[game-host] 出站首现 {} → {}", m.type_name, preview);
+            crate::srv_log!("[game-host] 出站首现 {} → {}", m.type_name, preview);
         }
     }
     match m.target_uid {
         None => {
-            // 广播（base.game:ui）：全部已进图会话；无人就绪则挂起待补
+            // 广播（base.game:ui）：全部已进图会话（各自组帧：seq/f4 为会话级状态）
             let mut delivered = false;
-            for br in brains.values() {
+            for br in brains.values_mut() {
                 if br.burst_done {
+                    let frame = build_ui_frame(br, type_id, &m.type_name, &m.args);
                     kcp.send(br.conv, &frame);
                     delivered = true;
                 }
@@ -161,11 +174,12 @@ fn send_lua_out(
                 if pending_broadcast.len() >= 2000 {
                     pending_broadcast.pop_front();
                 }
-                pending_broadcast.push_back(frame);
+                pending_broadcast.push_back((type_id, m.type_name.clone(), m.args.clone()));
             }
         }
         Some(uid) => {
-            if let Some(br) = brains.values().find(|br| br.userid == uid as u64) {
+            if let Some(br) = brains.values_mut().find(|br| br.userid == uid as u64) {
+                let frame = build_ui_frame(br, type_id, &m.type_name, &m.args);
                 kcp.send(br.conv, &frame);
             }
         }
@@ -184,7 +198,7 @@ fn patch_template_uid(body: &[u8], new_uid: u64, expect: Option<usize>) -> Vec<u
     let mut new = Vec::new();
     host::put_varint(&mut new, new_uid);
     if old.len() != new.len() {
-        println!("[game-host] [warn] userid={new_uid} varint 长度与模板基准不一致，登录应答用原模板（席位显示或不准）");
+        crate::srv_log!("[game-host] [warn] userid={new_uid} varint 长度与模板基准不一致，登录应答用原模板（席位显示或不准）");
         return body.to_vec();
     }
     let mut out = body.to_vec();
@@ -201,7 +215,7 @@ fn patch_template_uid(body: &[u8], new_uid: u64, expect: Option<usize>) -> Vec<u
     }
     if let Some(expect) = expect {
         if n != expect {
-            println!("[game-host] [warn] 登录应答模板 userid 补丁命中 {n} 处（预期 {expect}）——模板可能已漂移");
+            crate::srv_log!("[game-host] [warn] 登录应答模板 userid 补丁命中 {n} 处（预期 {expect}）——模板可能已漂移");
         }
     }
     out
@@ -250,7 +264,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
         let stop2 = Arc::clone(&ctl_stop);
         std::thread::spawn(move || {
             if let Err(e) = host_server::run(port, state, root, stop2) {
-                println!("[host-ctl] 控制面退出: {e}");
+                crate::srv_log!("[host-ctl] 控制面退出: {e}");
             }
         });
     }
@@ -264,17 +278,17 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
     let mut lua: Option<LuaBrain> = None;
     let mut last_frame = Instant::now();
 
-    /// 无就绪会话时挂起的广播帧（进图 burst 后补发，详见 send_lua_out 注释）
-    let mut pending_broadcast: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
+    /// 无就绪会话时挂起的广播裸载荷（type_id, type_name, args；进图 burst 后按会话组帧补发，详见 send_lua_out 注释）
+    let mut pending_broadcast: std::collections::VecDeque<(u32, String, Vec<u8>)> = std::collections::VecDeque::new();
     host_server::push_log(&state, "[shell-host] 自研壳 host 已启动（0.5.0 R3）");
-    println!("[game-host] 壳 host 已监听 TCP {} + UDP {}/{}，等待接入", params.port, params.port, params.port + 50);
+    crate::srv_log!("[game-host] 壳 host 已监听 TCP {} + UDP {}/{}，等待接入", params.port, params.port, params.port + 50);
     if let Some(tx) = ready_tx {
         let _ = tx.send(Ok(params.port));
     }
     loop {
         // 停止信号（「本地服务器」标签页 停止/重启）
         if STOP.load(std::sync::atomic::Ordering::Relaxed) {
-            println!("[game-host] 收到停止信号，清理退出");
+            crate::srv_log!("[game-host] 收到停止信号，清理退出");
             ctl_stop.store(true, std::sync::atomic::Ordering::Relaxed);
             lua = None;
             for conv in brains.keys().copied().collect::<Vec<_>>() {
@@ -299,7 +313,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
             }
         }
         if do_teardown {
-            println!("[game-host] 停局 teardown：清理全部会话");
+            crate::srv_log!("[game-host] 停局 teardown：清理全部会话");
             lua = None;
             pending_broadcast.clear();
             for conv in brains.keys().copied().collect::<Vec<_>>() {
@@ -309,7 +323,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
             host_server::push_log(&state, "[shell-host] 局已销毁，可接下一局");
         }
         if let Some(info) = new_game {
-            println!("[game-host] 起局: {} session={}", info.project, info.session_id);
+            crate::srv_log!("[game-host] 起局: {} session={}", info.project, info.session_id);
             // R4：起 lua 编排脑（失败回退 R3 壳行为，不阻断进图）
             let script_dir = info.upload_dir.join("script");
             lua = match LuaBrain::new(
@@ -324,7 +338,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                     Some(b)
                 }
                 Err(e) => {
-                    println!("[game-host] lua 编排加载失败（回退壳模式）: {e}");
+                    crate::srv_log!("[game-host] lua 编排加载失败（回退壳模式）: {e}");
                     host_server::push_log(&state, &format!("[game-host] lua 加载失败，回退壳模式: {e}"));
                     None
                 }
@@ -336,7 +350,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
         for ev in kcp.poll() {
             match ev {
                 Event::NewSession { conv } => {
-                    println!("[game-host] KCP 会话建立 conv={conv:#x}");
+                    crate::srv_log!("[game-host] KCP 会话建立 conv={conv:#x}");
                     brains.insert(conv, SessionBrain::new(conv));
                 }
                 Event::Message { conv, body } => {
@@ -346,7 +360,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                         1 => {
                             // 登录：{f1 userid, ...}
                             brain.userid = host::body_varint(&mbody, 1).unwrap_or(0);
-                            println!("[game-host] 登录: userid={}", brain.userid);
+                            crate::srv_log!("[game-host] 登录: userid={}", brain.userid);
                             // 登录应答（模板 type 2，原位补丁本人 userid）+ 0x15
                             for &(ty2, hexs) in tpl::H2C_SEQ.iter().take(2) {
                                 let body = tpl::unhex(hexs);
@@ -367,15 +381,16 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                             // 状态（收到即弃）；msg5 = 客户端加载完毕信号 → 触发初始化消息群
                             if !brain.burst_done {
                                 brain.burst_done = true;
-                                println!("[game-host] 客户端加载完成，发送初始化消息群");
+                                crate::srv_log!("[game-host] 客户端加载完成，发送初始化消息群");
                                 send_burst(&mut kcp, conv, lua.is_some(), brain.userid);
-                                // 补发接入前挂起的广播（BOSS/技能书等先于玩家刷出的世界状态）
+                                // 补发接入前挂起的广播（BOSS/技能书等先于玩家刷出的世界状态；按本会话组帧）
                                 if !pending_broadcast.is_empty() {
                                     let n = pending_broadcast.len();
-                                    for frame in pending_broadcast.drain(..) {
+                                    for (tid, name, args) in pending_broadcast.drain(..) {
+                                        let frame = build_ui_frame(brain, tid, &name, &args);
                                         kcp.send(conv, &frame);
                                     }
-                                    println!("[game-host] 补发挂起广播 {n} 条");
+                                    crate::srv_log!("[game-host] 补发挂起广播 {n} 条");
                                 }
                                 host_server::push_log(&state, "[shell-host] 客户端进图，初始化消息群已下发");
                             }
@@ -404,7 +419,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                     }
                 }
                 Event::Closed { conv } => {
-                    println!("[game-host] KCP 会话结束 conv={conv:#x}");
+                    crate::srv_log!("[game-host] KCP 会话结束 conv={conv:#x}");
                     // R4：玩家-断线事件
                     if let (Some(b), Some(br)) = (&lua, brains.get(&conv)) {
                         if br.userid != 0 {
@@ -429,7 +444,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                 last_frame = Instant::now();
             }
             for m in b.drain_out() {
-                send_lua_out(&mut kcp, &brains, b, &m, &mut pending_broadcast);
+                send_lua_out(&mut kcp, &mut brains, b, &m, &mut pending_broadcast);
             }
             for l in b.drain_logs() {
                 host_server::push_log_ex(&state, &l.pos, l.frame, &format!("[lua:{}] {}", l.level, l.text));
@@ -440,7 +455,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
     // 退出清理：复位运行标记（可重启）
     *RUNNING.lock().unwrap() = None;
     *STATE.lock().unwrap() = None;
-    println!("[game-host] host 已停止");
+    crate::srv_log!("[game-host] host 已停止");
     Ok(())
 }
 
@@ -469,7 +484,7 @@ pub fn ensure_running(params: GameHostParams) -> Result<u16> {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         if let Err(e) = run(params, Some(tx)) {
-            println!("[game-host] 壳 host 退出: {e}");
+            crate::srv_log!("[game-host] 壳 host 退出: {e}");
         }
     });
     match rx.recv_timeout(Duration::from_secs(10)) {

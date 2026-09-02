@@ -140,6 +140,9 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **host 界面生命周期**：「本地服务器」标签页 启动/重启/停止 host（game_host STOP 信号 + 控制面非阻塞 accept 轮询退出；重启=等旧实例让出端口后 ensure_running）。
 - **0xF00C 位置/帧号**：编辑器「调试信息面板」的位置列=f4、帧号列=f3（我们曾写死 "shell-host"/0 被用户发现）。修复：lua 日志从 bgd 格式化文本抓 `[xxx.lua:NNN]` 进 f4，f3=逻辑帧计数（pump_frame 每帧 +1）；host 内部日志保持 pos="shell-host"。
 - **踩坑（2026-09-03，v0.5.0 回归 bug）**：**Windows 下 `listener.set_nonblocking(true)` 后 accept 出的套接字继承非阻塞标志**（与 Unix 不同！），handle_conn 阻塞读帧即 10035 WSAEWOULDBLOCK → 服务端断连 → 客户端报 10053「你的主机中的软件中止了一个已建立的连接」。修复：accept 后显式 `stream.set_nonblocking(false)`。教训：控制面为支持停止改非阻塞 accept 轮询时，必须记得还原连接套接字。
+- **踩坑②（2026-09-03，v0.5.0 多人 bug）**：**0x7008 的 f2 seq 与 f4 type_name 首现都是会话级状态**——客户端按连接维护 type_id↔名字映射表（§13.5 on_ui_message_new）。v0.5.0 错按全局首现/全局 seq，第三个客户端起收不到 f4 名字映射 → 玩法下发全丢（表现：第三人看不到任何玩家，Req_PlayerList 狂重试）。修复：seq/seen_types 移入 SessionBrain，广播按会话各自组帧，pending_broadcast 改存裸载荷（type_id, name, args）补发时按会话组帧。复验：三客户端 Req_PlayerList 各仅 1 次（修前第三人 5+ 次重试）。
+- **踩坑③（2026-09-03）**：local_play 每个账号启动都重建 staging，局运行中客户端正占用 staging 文件 → 第三人起 staging::create 撞文件锁（os error 32）。修复：staging 只在局未起时生成，后续账号复用本局目录；合成凭证注入加 sharing 冲突重试（20×500ms）。
+- **服务器日志面板（0.5.1）**：`core/logbus.rs` 总线（`srv_log!` 宏 = println! + 5000 行环形缓冲 tee），game_host/host_server/lua_host 全部 stdout 日志进总线；「本地服务器」页右栏日志面板（滚屏/暂停滚屏 = 只冻结自动滚动照收新行、关键字筛选、清空）。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 
