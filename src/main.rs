@@ -530,7 +530,7 @@ fn cli_host(args: &[String]) {
                     "--env" => { env_domain = args.get(i + 1).cloned().unwrap_or(env_domain); i += 2; }
                     "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
                     "--capture" => { capture = args.get(i + 1).cloned(); i += 2; }
-                    "--shell" => { shell = true; i += 1; }
+                    "--shell" | "--local" => { shell = true; i += 1; }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }

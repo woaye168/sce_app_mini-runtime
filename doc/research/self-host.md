@@ -136,6 +136,7 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **「本地服务器」标签页**（ui/local_server.rs + core/local_accounts.rs + core/local_play.rs）：SQLite 账号库（exe 旁 local_accounts.db，rusqlite bundled），账号创建/删除/每账号「启动/停止」；局未起时首个启动自动上传起局（控制连接全局持有保 0xF00C 日志通道）。
 - **本地账号 = 合成凭证直通**：`login=1 + token=local-<userid> + token_type=11` 即可过客户端大厅自动登录闸门，**全程零网络零真实凭证**（玩家甲/乙 90000002/90000001 双开进局实证 2026-09-02）——这也是整体验收「断网+无凭证」的通行证。
 - **多账号正确性**：登录应答/0x102 模板按实际 userid 原位补丁（varint 等长；本地账号 userid 90000001 起分配在 4 字节 varint 区间）。
+- **PIE 验收（2026-09-02，lua 编排脑在线）**：编辑器「调试（本地服务器）」连 standalone `host start --local`（token=qwert 放行）→ 上传/EditorStartGame → lua 加载链 → PIE 客户端进局渲染（截图确认）→ 停止调试 0xF01B teardown → 第二局完整再接入。与官方本地调试完全同构。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 
