@@ -341,29 +341,32 @@ fn connect_inner(
         send(Some(1.0), "本地缓存已是最新，无需下载".into());
     }
 
-    // ④ 逐文件下载到缓存（创建父目录，进度 i/N）
+    // ④ 逐文件下载到缓存（创建父目录，进度 i/N；外网 NAT 偶发断连，单文件最多 3 次重试）
     let total = download_list.len();
     for (i, f) in download_list.iter().enumerate() {
         send(
             Some(i as f32 / total.max(1) as f32),
             format!("正在下载 {}/{}: {}", i + 1, total, f.path),
         );
-        let url = format!("{base}/file?path={}", url_encode_path(&f.path));
-        let resp = client
-            .get(&url)
-            .send()
-            .map_err(|e| anyhow!("下载失败 {}: {e}", f.path))?;
-        if !resp.status().is_success() {
-            return Err(anyhow!("下载失败 {}: HTTP {}", f.path, resp.status()));
+        let mut last_err: Option<anyhow::Error> = None;
+        for attempt in 1..=3u8 {
+            match download_one(&client, &base, f, &staging_dir) {
+                Ok(()) => {
+                    last_err = None;
+                    break;
+                }
+                Err(e) => {
+                    last_err = Some(e);
+                    if attempt < 3 {
+                        send(None, format!("下载失败，300ms 后第 {} 次重试: {}", attempt + 1, f.path));
+                        std::thread::sleep(Duration::from_millis(300));
+                    }
+                }
+            }
         }
-        let bytes = resp
-            .bytes()
-            .map_err(|e| anyhow!("读取失败 {}: {e}", f.path))?;
-        let dest = safe_join(&staging_dir, &f.path)?;
-        if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
+        if let Some(e) = last_err {
+            return Err(e);
         }
-        std::fs::write(&dest, &bytes)?;
     }
 
     // ⑤ 写合成凭证（本地 host 放行任意 token；login=1 + token 形态合法即可过大厅登录闸门）
@@ -452,6 +455,32 @@ impl ManifestFile {
             _ => None,
         }
     }
+}
+
+/// 下载单个文件到缓存（供重试循环调用）
+fn download_one(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    f: &ManifestFile,
+    staging_dir: &Path,
+) -> Result<()> {
+    let url = format!("{base}/file?path={}", url_encode_path(&f.path));
+    let resp = client
+        .get(&url)
+        .send()
+        .map_err(|e| anyhow!("下载失败 {}: {e}", f.path))?;
+    if !resp.status().is_success() {
+        return Err(anyhow!("下载失败 {}: HTTP {}", f.path, resp.status()));
+    }
+    let bytes = resp
+        .bytes()
+        .map_err(|e| anyhow!("读取失败 {}: {e}", f.path))?;
+    let dest = safe_join(staging_dir, &f.path)?;
+    if let Some(parent) = dest.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&dest, &bytes)?;
+    Ok(())
 }
 
 /// 本地缓存文件是否与清单一致（存在 + size + xxh64 全对才算命中）

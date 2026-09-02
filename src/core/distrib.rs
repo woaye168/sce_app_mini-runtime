@@ -3,7 +3,8 @@
 //! 手写 std::net::TcpListener 极简 HTTP/1.x（不引入新依赖）：
 //! - `GET /manifest` → 实时扫 staging 白名单（与 staging.rs 同集合），逐文件 xxh64 + size 出 JSON
 //! - `GET /file?path=<相对路径>` → 回文件字节（路径穿越防护 + 白名单限定）
-//! - 一请求一连接（Connection: close），简单可靠
+//! - keep-alive 多请求复用连接（对端逐文件下载量上千，一请求一连接会把路由器
+//!   NAT 连接跟踪表打满——外网实测中途断连；30s 空闲超时自动关）
 //!
 //! 服务模式与 host_server.rs 一致：非阻塞 accept 轮询（100ms）+ stop 信号退出。
 
@@ -65,52 +66,75 @@ pub fn run(params: DistribParams, stop: Arc<AtomicBool>) -> Result<()> {
     Ok(())
 }
 
-/// 单连接处理：读到 \r\n\r\n 即止，解析请求行后路由
+/// 单连接处理：keep-alive 多请求循环（对端上千个文件逐一下载，一请求一连接
+/// 会让路由器 NAT 连接跟踪表剧烈抖动——外网实测中途 "error sending request"）。
+/// 读到 \r\n\r\n 即止（GET 无 body），30s 空闲超时自动关闭防线程悬挂。
 fn handle_conn(mut s: TcpStream, staging_dir: &Path) -> Result<()> {
-    let mut buf = Vec::with_capacity(4096);
+    s.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     loop {
-        if find_subslice(&buf, b"\r\n\r\n").is_some() {
-            break;
-        }
-        if buf.len() >= MAX_HEADER {
-            return respond(&mut s, 431, "text/plain", b"request header too large");
-        }
-        let n = match s.read(&mut chunk) {
-            Ok(0) => return Ok(()), // 对端关闭
-            Ok(n) => n,
-            Err(e) => return Err(anyhow!("读请求失败: {e}")),
+        let head_end = loop {
+            if let Some(p) = find_subslice(&buf, b"\r\n\r\n") {
+                break p;
+            }
+            if buf.len() >= MAX_HEADER {
+                return respond(&mut s, 431, "text/plain", b"request header too large", false);
+            }
+            match s.read(&mut chunk) {
+                Ok(0) => return Ok(()), // 对端关闭
+                Ok(n) => buf.extend_from_slice(&chunk[..n]),
+                // 读超时（WouldBlock/TimedOut）= 空闲 keep-alive 到期，正常关闭
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    return Ok(())
+                }
+                Err(e) => return Err(anyhow!("读请求失败: {e}")),
+            }
         };
-        buf.extend_from_slice(&chunk[..n]);
+        let head = String::from_utf8_lossy(&buf[..head_end]).to_string();
+        buf.drain(..head_end + 4);
+        // HTTP/1.1 默认 keep-alive；仅显式 Connection: close 时响应后关闭
+        let keep_alive = !head
+            .lines()
+            .any(|l| l.eq_ignore_ascii_case("connection: close"));
+        let request_line = head.lines().next().unwrap_or("");
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or("");
+        let target = parts.next().unwrap_or("").to_string();
+        if method != "GET" {
+            return respond(&mut s, 405, "text/plain", b"method not allowed", false);
+        }
+        route(&mut s, &target, staging_dir, keep_alive)?;
+        if !keep_alive {
+            return Ok(());
+        }
     }
-    let head_end = find_subslice(&buf, b"\r\n\r\n").unwrap();
-    let head = String::from_utf8_lossy(&buf[..head_end]);
-    let request_line = head.lines().next().unwrap_or("");
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let target = parts.next().unwrap_or("");
-    if method != "GET" {
-        return respond(&mut s, 405, "text/plain", b"method not allowed");
-    }
+}
+
+/// 路由：解析 target 并写响应（keep-alive 由 handle_conn 循环维持）
+fn route(s: &mut TcpStream, target: &str, staging_dir: &Path, keep_alive: bool) -> Result<()> {
 
     let (route, query) = target.split_once('?').unwrap_or((target, ""));
     match route {
         "/manifest" => {
             let body = build_manifest(staging_dir)?;
-            respond(&mut s, 200, "application/json", body.as_bytes())
+            respond(s, 200, "application/json", body.as_bytes(), keep_alive)
         }
         "/base_assets" => {
             // 基座资产（update-info 不分发的编辑器资产）：房主本机已同步到
-            // <runtime>/Update/<env>/Res + <runtime>/Res，打包 7z 整体下发（对端零 GitHub token）。
+            // <runtime>/Update/<env>/Res + <runtime>/Res，打 zip 整体下发（对端零 GitHub token）。
             // staging 同级定位 runtime 根：staging = <runtime>/User/debug/<项目>
             match build_base_assets(staging_dir) {
                 Ok(bytes) => {
                     crate::srv_log!("[distrib] 基座资产打包下发 {} MB", bytes.len() / 1024 / 1024);
-                    respond(&mut s, 200, "application/octet-stream", &bytes)
+                    respond(s, 200, "application/octet-stream", &bytes, keep_alive)
                 }
                 Err(e) => {
                     crate::srv_log!("[distrib] 基座资产不可用: {e}");
-                    respond(&mut s, 404, "text/plain", b"base assets unavailable")
+                    respond(s, 404, "text/plain", b"base assets unavailable", keep_alive)
                 }
             }
         }
@@ -124,20 +148,20 @@ fn handle_conn(mut s: TcpStream, staging_dir: &Path) -> Result<()> {
                 Ok(path) => {
                     let bytes = std::fs::read(&path)
                         .map_err(|e| anyhow!("读文件失败 {}: {e}", crate::core::disp(&path)))?;
-                    respond(&mut s, 200, "application/octet-stream", &bytes)
+                    respond(s, 200, "application/octet-stream", &bytes, keep_alive)
                 }
                 Err(e) => {
                     crate::srv_log!("[distrib] 拒绝文件请求 path={raw}: {e}");
-                    respond(&mut s, 404, "text/plain", b"not found")
+                    respond(s, 404, "text/plain", b"not found", keep_alive)
                 }
             }
         }
-        _ => respond(&mut s, 404, "text/plain", b"not found"),
+        _ => respond(s, 404, "text/plain", b"not found", keep_alive),
     }
 }
 
-/// 写响应（Content-Length 后 keep-alive 关闭：一请求一连接）
-fn respond(s: &mut TcpStream, code: u16, content_type: &str, body: &[u8]) -> Result<()> {
+/// 写响应（Content-Length 定长；keep_alive 决定 Connection 头，循环由调用方维持）
+fn respond(s: &mut TcpStream, code: u16, content_type: &str, body: &[u8], keep_alive: bool) -> Result<()> {
     let reason = match code {
         200 => "OK",
         404 => "Not Found",
@@ -145,8 +169,9 @@ fn respond(s: &mut TcpStream, code: u16, content_type: &str, body: &[u8]) -> Res
         431 => "Request Header Fields Too Large",
         _ => "Error",
     };
+    let conn = if keep_alive { "keep-alive" } else { "close" };
     let head = format!(
-        "HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {code} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: {conn}\r\n\r\n",
         body.len()
     );
     s.write_all(head.as_bytes())?;
