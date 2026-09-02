@@ -37,13 +37,22 @@ fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([480.0, 360.0])
-            .with_min_inner_size([420.0, 320.0]),
+            .with_min_inner_size([420.0, 320.0])
+            // 窗口标题栏/任务栏图标（exe 文件图标由 build.rs 嵌 assets/app.ico）
+            .with_icon(
+                eframe::icon_data::from_png_bytes(include_bytes!("../../assets/icon.png"))
+                    .expect("内嵌图标 PNG 解码失败"),
+            ),
         ..Default::default()
     };
     eframe::run_native(
         "联机客户端",
         options,
-        Box::new(|_cc| Ok(Box::new(MiniClientApp::load()))),
+        Box::new(|cc| {
+            // egui 默认字体无中文字形，装系统中文字体（微软雅黑，appsdk 壳同款）
+            bgd_appsdk::ui::setup_chinese_font(&cc.egui_ctx);
+            Ok(Box::new(MiniClientApp::load()))
+        }),
     )
 }
 
@@ -262,38 +271,7 @@ fn connect_inner(
     let kind = core::runtimes::RuntimeKind::EditorApi(API_VERSION);
     let runtime_dir = exe_sibling("runtime");
 
-    // ① 引擎就绪检查：缺则走官方 update-info + OSS 下载（首次约 150MB）。
-    // 基座资产 update-info 不分发、对端无 GitHub token —— 注入房主分发口 /base_assets 直下
-    let dist_port0 = port + DIST_PORT_OFFSET;
-    // SAFETY：连接流程单线程顺序执行，无并发 env 竞争
-    unsafe {
-        std::env::set_var(
-            "MINI_RUNTIME_BASE_ASSETS_URL",
-            format!("http://{ip}:{dist_port0}/base_assets"),
-        );
-    }
-    if !kind.engine_ready(&runtime_dir) {
-        send(
-            None,
-            format!("引擎未就绪，下载运行时中（{}，首次较慢）...", kind.display_name()),
-        );
-        let params = core::payload::SyncParams {
-            runtime_dir: runtime_dir.clone(),
-            env_domain: ENV_DOMAIN.to_string(),
-            api_version: API_VERSION,
-            project_libs: Vec::new(), // 对端只跑客户端，依赖库随游戏文件分发
-            project_root: None,       // 对端无本机编辑器，基座资产走自分发下载
-            dry_run: false,
-            runtime_kind: Some(kind),
-        };
-        let mut log = |msg: String| send(None, format!("[载荷] {msg}"));
-        core::payload::sync(&params, &mut log).map_err(|e| anyhow!("引擎下载失败: {e}"))?;
-        send(None, "引擎就绪".into());
-    } else {
-        send(None, "引擎已就绪".into());
-    }
-
-    // ② 拉游戏 manifest（分发端口 = 连接端口 + 80）
+    // ① 先拉游戏 manifest（分发端口 = 连接端口 + 80）：依赖库清单在载荷同步里要用
     let dist_port = port + DIST_PORT_OFFSET;
     let base = format!("http://{ip}:{dist_port}");
     send(None, format!("拉取游戏清单: {base}/manifest"));
@@ -317,6 +295,39 @@ fn connect_inner(
         Some(0.0),
         format!("游戏「{}」共 {} 个文件，比对本地缓存...", manifest.project, manifest.files.len()),
     );
+
+    // ② 引擎/依赖库就绪检查：缺则走官方 update-info + OSS 下载（首次约 150MB）。
+    // 基座资产 update-info 不分发、对端无 GitHub token —— 注入房主分发口 /base_assets 直下。
+    // 依赖库（libs.json 键）必须随载荷落位 _m/maps —— 缺了客户端 lua 入口
+    // require @global_default 直接报错，卡在「正在加载游戏逻辑」
+    // SAFETY：连接流程单线程顺序执行，无并发 env 竞争
+    unsafe {
+        std::env::set_var(
+            "MINI_RUNTIME_BASE_ASSETS_URL",
+            format!("http://{ip}:{dist_port}/base_assets"),
+        );
+    }
+    let libs_missing = !manifest.libs.is_empty() && !libs_placed(&runtime_dir, &manifest.libs);
+    if !kind.engine_ready(&runtime_dir) || libs_missing {
+        send(
+            None,
+            format!("引擎/依赖库未就绪，下载运行时中（{}，首次较慢）...", kind.display_name()),
+        );
+        let params = core::payload::SyncParams {
+            runtime_dir: runtime_dir.clone(),
+            env_domain: ENV_DOMAIN.to_string(),
+            api_version: API_VERSION,
+            project_libs: manifest.libs.clone(),
+            project_root: None, // 对端无本机编辑器，基座资产走自分发下载
+            dry_run: false,
+            runtime_kind: Some(kind),
+        };
+        let mut log = |msg: String| send(None, format!("[载荷] {msg}"));
+        core::payload::sync(&params, &mut log).map_err(|e| anyhow!("引擎下载失败: {e}"))?;
+        send(None, "引擎就绪".into());
+    } else {
+        send(None, "引擎已就绪".into());
+    }
 
     // ③ 增量比对本地缓存 exe 旁 cache/<project>/（size + xxh64 双判）
     let staging_dir = exe_sibling("cache").join(&manifest.project);
@@ -399,7 +410,28 @@ fn connect_inner(
 #[derive(Debug, serde::Deserialize)]
 struct Manifest {
     project: String,
+    /// 项目依赖库（libs.json 键；旧版房主无此字段时为空 = 跳过依赖库检查）
+    #[serde(default)]
+    libs: Vec<String>,
     files: Vec<ManifestFile>,
+}
+
+/// 依赖库是否已全部登记进 api_pak_version.json（payload 落位标志）
+fn libs_placed(runtime_dir: &Path, libs: &[String]) -> bool {
+    let reg_path = runtime_dir
+        .join("Update")
+        .join(ENV_DOMAIN)
+        .join("api_pak_version.json");
+    let Ok(content) = std::fs::read_to_string(reg_path) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    let Some(api_obj) = v.get(API_VERSION.to_string()).and_then(|o| o.as_object()) else {
+        return false;
+    };
+    libs.iter().all(|l| api_obj.contains_key(l))
 }
 
 #[derive(Debug, serde::Deserialize)]

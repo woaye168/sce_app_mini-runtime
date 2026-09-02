@@ -265,21 +265,23 @@ fn cli_local(args: &[String]) {
             _ => eprintln!("用法: local account list|create <名字>|remove <名字>"),
         },
         Some("play") => {
-            // local play --project <路径> --account <名字> [--account <名字2> ...] [--runtime <载荷目录>]
+            // local play --project <路径> --account <名字> [--account <名字2> ...] [--runtime <载荷目录>] [--bind <地址>]
             let mut project = None;
             let mut runtime = None;
             let mut names: Vec<String> = Vec::new();
+            let mut bind_addr = "127.0.0.1".to_string();
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
                     "--project" => { project = args.get(i + 1).cloned(); i += 2; }
                     "--runtime" => { runtime = args.get(i + 1).cloned(); i += 2; }
                     "--account" => { names.push(args.get(i + 1).cloned().unwrap_or_default()); i += 2; }
+                    "--bind" => { bind_addr = args.get(i + 1).cloned().unwrap_or(bind_addr); i += 2; }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }
             let Some(project) = project else {
-                eprintln!("用法: local play --project <路径> --account <名字> [--account <名字2> ...] [--runtime <载荷目录>]");
+                eprintln!("用法: local play --project <路径> --account <名字> [--account <名字2> ...] [--runtime <载荷目录>] [--bind <地址>]");
                 return;
             };
             if names.is_empty() {
@@ -301,7 +303,7 @@ fn cli_local(args: &[String]) {
                         runtime_dir: runtime_dir.clone(),
                         env_domain: "editor-pd.spark.xd.com".into(),
                         account: acc.clone(),
-                        bind_addr: "127.0.0.1".into(),
+                        bind_addr: bind_addr.clone(),
                     },
                     &mut |msg| println!("[play] {msg}"),
                 ) {
@@ -523,6 +525,7 @@ fn cli_host(args: &[String]) {
             let mut cred_label = None;
             let mut capture = None;
             let mut shell = false;
+            let mut bind_addr = "127.0.0.1".to_string();
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -531,6 +534,7 @@ fn cli_host(args: &[String]) {
                     "--env" => { env_domain = args.get(i + 1).cloned().unwrap_or(env_domain); i += 2; }
                     "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
                     "--capture" => { capture = args.get(i + 1).cloned(); i += 2; }
+                    "--bind" => { bind_addr = args.get(i + 1).cloned().unwrap_or(bind_addr); i += 2; }
                     "--shell" | "--local" => { shell = true; i += 1; }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
@@ -546,7 +550,7 @@ fn cli_host(args: &[String]) {
                     .unwrap_or_else(|_| PathBuf::from("runtime"));
                 println!("项目 {project}，壳 host（真本地，无云端）启动...");
                 if let Err(e) = core::game_host::run(
-                    core::game_host::GameHostParams { port, runtime_dir, env_domain: env_domain.clone(), bind_addr: "127.0.0.1".into() },
+                    core::game_host::GameHostParams { port, runtime_dir, env_domain: env_domain.clone(), bind_addr },
                     None,
                 ) {
                     eprintln!("壳 host 退出: {e}");

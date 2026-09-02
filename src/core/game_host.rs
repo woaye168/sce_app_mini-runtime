@@ -180,9 +180,14 @@ fn send_lua_out(
             }
         }
         Some(uid) => {
-            if let Some(br) = brains.values_mut().find(|br| br.userid == uid as u64) {
-                let frame = build_ui_frame(br, type_id, &m.type_name, &m.args);
-                kcp.send(br.conv, &frame);
+            match brains.values_mut().find(|br| br.userid == uid as u64) {
+                Some(br) => {
+                    let frame = build_ui_frame(br, type_id, &m.type_name, &m.args);
+                    kcp.send(br.conv, &frame);
+                    crate::srv_log!("[game-host] 定向出站 {} → uid={} conv={:#x}", m.type_name, uid, br.conv);
+                }
+                // 定向目标不在线（重连间隙/已断）——记一次便于排障「消息发给了空气」
+                None => crate::srv_log!("[game-host] [warn] 定向出站 {} 无目标会话 uid={}（丢弃）", m.type_name, uid),
             }
         }
     }

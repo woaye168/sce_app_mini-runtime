@@ -242,11 +242,19 @@ fn build_manifest(staging_dir: &Path) -> Result<String> {
             files.push(file_entry(staging_dir, &path)?);
         }
     }
+    // 项目依赖库（libs.json 键）：对端 payload 同步要按它装 _m/maps 库，
+    // 缺了客户端 lua 入口 require @global_default 直接失败卡加载
+    let libs: Vec<String> = std::fs::read_to_string(staging_dir.join("libs.json"))
+        .ok()
+        .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
+        .and_then(|v| v.as_object().map(|o| o.keys().cloned().collect()))
+        .unwrap_or_default();
     let body = serde_json::json!({
         "project": project,
+        "libs": libs,
         "files": files,
     });
-    crate::srv_log!("[distrib] manifest：{} 个文件", files.len());
+    crate::srv_log!("[distrib] manifest：{} 个文件，{} 个依赖库", files.len(), libs.len());
     Ok(body.to_string())
 }
 
