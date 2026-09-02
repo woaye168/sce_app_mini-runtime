@@ -237,16 +237,19 @@ fn send_1108(kcp: &mut KcpServer, conv: u32, probe_f1: u64, session_id: u64) {
 
 /// 前台阻塞跑壳 host（host start / debug start --host local 的线程体）
 pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Result<u16, String>>>) -> Result<()> {
+    STOP.store(false, std::sync::atomic::Ordering::Relaxed);
     let state: ControlRef = host_server::new_state();
     *STATE.lock().unwrap() = Some(Arc::clone(&state));
     let upload_root = params.runtime_dir.join("User").join("host_upload");
     // 控制面线程（TCP 5003）
+    let ctl_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     {
         let state = Arc::clone(&state);
         let root = upload_root.clone();
         let port = params.port;
+        let stop2 = Arc::clone(&ctl_stop);
         std::thread::spawn(move || {
-            if let Err(e) = host_server::run(port, state, root) {
+            if let Err(e) = host_server::run(port, state, root, stop2) {
                 println!("[host-ctl] 控制面退出: {e}");
             }
         });
@@ -269,6 +272,17 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
         let _ = tx.send(Ok(params.port));
     }
     loop {
+        // 停止信号（「本地服务器」标签页 停止/重启）
+        if STOP.load(std::sync::atomic::Ordering::Relaxed) {
+            println!("[game-host] 收到停止信号，清理退出");
+            ctl_stop.store(true, std::sync::atomic::Ordering::Relaxed);
+            lua = None;
+            for conv in brains.keys().copied().collect::<Vec<_>>() {
+                kcp.close(conv);
+            }
+            brains.clear();
+            break;
+        }
         // 起局/停局信号同步（注意：锁内禁止 push_log——push_log 会再拿锁，Mutex 不可重入死锁）
         let mut new_game = None;
         let mut do_teardown = false;
@@ -418,21 +432,33 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                 send_lua_out(&mut kcp, &brains, b, &m, &mut pending_broadcast);
             }
             for l in b.drain_logs() {
-                host_server::push_log(&state, &format!("[lua:{}] {}", l.level, l.text));
+                host_server::push_log_ex(&state, &l.pos, l.frame, &format!("[lua:{}] {}", l.level, l.text));
             }
         }
         std::thread::sleep(Duration::from_millis(5));
     }
+    // 退出清理：复位运行标记（可重启）
+    *RUNNING.lock().unwrap() = None;
+    *STATE.lock().unwrap() = None;
+    println!("[game-host] host 已停止");
+    Ok(())
 }
 
 /// 幂等确保壳 host 在跑（GUI/CLI debug 复用）
 static RUNNING: Mutex<Option<u16>> = Mutex::new(None);
 /// 运行中 host 的控制面共享状态（「本地服务器」标签页查局状态用）
 static STATE: Mutex<Option<ControlRef>> = Mutex::new(None);
+/// 停止信号（「本地服务器」标签页 停止/重启 用）
+static STOP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// 取运行中 host 的控制面状态（未运行 = None）
 pub fn control_state() -> Option<ControlRef> {
     STATE.lock().unwrap().clone()
+}
+
+/// 停止运行中的 host（主循环下一拍退出并释放端口；幂等）
+pub fn stop_running() {
+    STOP.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn ensure_running(params: GameHostParams) -> Result<u16> {

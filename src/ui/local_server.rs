@@ -13,11 +13,30 @@ impl crate::App {
             self.ls_need_reload = false;
         }
 
-        // host / 局状态
+        // host / 局状态 + 生命周期按钮（启动/重启/停止）
         let host_running = crate::core::game_host::control_state().is_some();
         let game = crate::core::local_play::game_active();
         ui.horizontal(|ui| {
-            ui.label(if host_running { "host：运行中（127.0.0.1:5003）" } else { "host：未运行（首个「启动」自动拉起）" });
+            ui.label(if host_running { "host：运行中（127.0.0.1:5003）" } else { "host：未运行" });
+            if !host_running && ui.button("启动 host").clicked() {
+                start_host(self);
+            }
+            if host_running && ui.button("重启 host").clicked() {
+                crate::core::game_host::stop_running();
+                std::thread::spawn(|| {
+                    // 等旧实例退出（主循环 5ms 一拍 + 控制面 100ms 一轮）
+                    for _ in 0..50 {
+                        if crate::core::game_host::control_state().is_none() {
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(100));
+                    }
+                    let _ = crate::core::game_host::ensure_running(host_params());
+                });
+            }
+            if host_running && ui.button("停止 host").clicked() {
+                crate::core::game_host::stop_running();
+            }
         });
         ui.horizontal(|ui| {
             ui.label(match &game {
@@ -141,6 +160,25 @@ impl crate::App {
             ui.label("启动中（首启动含上传起局，约几十秒）...");
         }
     }
+}
+
+/// host 参数（exe 旁 runtime + 编辑器域）
+fn host_params() -> crate::core::game_host::GameHostParams {
+    crate::core::game_host::GameHostParams {
+        port: 5003,
+        runtime_dir: std::env::current_exe()
+            .map(|e| e.with_file_name("runtime"))
+            .unwrap_or_else(|_| PathBuf::from("runtime")),
+        env_domain: "editor-pd.spark.xd.com".into(),
+    }
+}
+
+/// 启动 host（后台线程，防阻塞 UI）
+fn start_host(app: &mut crate::App) {
+    std::thread::spawn(|| {
+        let _ = crate::core::game_host::ensure_running(host_params());
+    });
+    app.status = "host 启动中...".into();
 }
 
 /// 进程存活检查（tasklist 查 pid）

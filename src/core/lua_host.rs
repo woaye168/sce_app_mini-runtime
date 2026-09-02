@@ -33,11 +33,13 @@ pub struct OutMsg {
     pub args: Vec<u8>, // cmsg_pack 字节
 }
 
-/// 日志行（lua log.* → 0xF00C + stdout）
+/// 日志行（lua log.* → 0xF00C + stdout；pos=代码位置，frame=逻辑帧号——编辑器调试信息面板列）
 #[derive(Debug)]
 pub struct LogLine {
     pub level: String,
     pub text: String,
+    pub pos: String,
+    pub frame: u64,
 }
 
 /// 调度器任务（base.next / wait / timer_wait / timer_loop）
@@ -74,6 +76,8 @@ struct Inner {
     cache_inited: bool,
     /// 收到但 type 未注册的消息（记录一次用于排障）
     unrouted_once: Vec<String>,
+    /// 逻辑帧号（pump_frame 每帧 +1；日志「帧号」列）
+    frame_no: u64,
 }
 
 pub struct LuaBrain {
@@ -121,6 +125,7 @@ impl LuaBrain {
             data_cache: HashMap::new(),
             cache_inited: false,
             unrouted_once: Vec::new(),
+            frame_no: 0,
         }));
         let brain = Self {
             lua,
@@ -183,6 +188,7 @@ impl LuaBrain {
 
     /// 帧泵（game_host 每轮调用）：到期任务 + 游戏-帧（调用方控频）
     pub fn pump_frame(&self) {
+        self.inner.borrow_mut().frame_no += 1;
         self.fire_event("游戏-帧", &[Value::Nil], &[]);
         // 到期调度任务
         let due: Vec<Task> = {
@@ -399,10 +405,7 @@ impl LuaBrain {
 
     fn log_line(&self, level: &str, text: &str) {
         println!("[lua] {text}");
-        self.inner.borrow_mut().logs.push_back(LogLine {
-            level: level.into(),
-            text: text.into(),
-        });
+        push_log_inner(&self.inner, level, text);
     }
 
     fn make_player(&self, uid: i64, nick: &str) -> LuaResult<Table> {
@@ -460,10 +463,7 @@ impl LuaBrain {
                         .collect::<Vec<_>>()
                         .join("\t");
                     println!("[lua] {text}");
-                    inner.borrow_mut().logs.push_back(LogLine {
-                        level: lv.clone(),
-                        text,
-                    });
+                    push_log_inner(&inner, &lv, &text);
                     Ok(())
                 })?,
             )?;
@@ -487,10 +487,7 @@ impl LuaBrain {
                         .collect::<Vec<_>>()
                         .join("\t");
                     println!("[lua] {text}");
-                    inner.borrow_mut().logs.push_back(LogLine {
-                        level: "info".into(),
-                        text,
-                    });
+                    push_log_inner(&inner, "info", &text);
                     Ok(())
                 })?,
             )?;
@@ -1023,6 +1020,37 @@ fn collect_lua(dir: &Path, out: &mut Vec<PathBuf>) {
 
 fn pack_to_lua_string(bytes: &[u8]) -> Vec<u8> {
     bytes.to_vec()
+}
+
+/// 日志入队统一入口：pos 从文本抓 `[<path>.lua:<行号>]`（bgd log 模块已把调用点格式进文本），frame 取当前逻辑帧号
+fn push_log_inner(inner: &Rc<RefCell<Inner>>, level: &str, text: &str) {
+    let pos = parse_pos(text);
+    let mut g = inner.borrow_mut();
+    let frame = g.frame_no;
+    g.logs.push_back(LogLine {
+        level: level.into(),
+        text: text.into(),
+        pos,
+        frame,
+    });
+}
+
+/// 从 bgd 格式化日志文本提取代码位置（`[xxx.lua:123]` → `xxx.lua:123`；抓不到给 "lua"）
+fn parse_pos(text: &str) -> String {
+    if let Some(idx) = text.find(".lua:") {
+        let after = &text[idx + 5..];
+        let digits = after.chars().take_while(|c| c.is_ascii_digit()).count();
+        if digits > 0 {
+            let before = &text[..idx];
+            let start = before
+                .rfind('[')
+                .map(|i| i + 1)
+                .or_else(|| before.rfind(' ').map(|i| i + 1))
+                .unwrap_or(0);
+            return text[start..idx + 5 + digits].to_string();
+        }
+    }
+    "lua".to_string()
 }
 
 /// 引擎 lua 词法器放行 ≥0x80 标识符（TSTL 产物含中文参数名，lua_declare.lua:62 oracle 实证）；

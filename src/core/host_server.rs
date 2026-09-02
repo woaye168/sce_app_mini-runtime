@@ -26,7 +26,7 @@ pub struct ControlState {
     /// 收到 0xF01B / 连接断开 → 停局信号
     pub teardown: bool,
     /// 待推送到编辑器控制台的日志行（0xF00C 通道）
-    pub pending_logs: Vec<String>,
+    pub pending_logs: Vec<LogEntry>,
     /// 当前控制连接是否在线（日志推送目标存在性）
     pub editor_online: bool,
 }
@@ -42,6 +42,14 @@ pub struct GameInfo {
 
 pub type ControlRef = Arc<Mutex<ControlState>>;
 
+/// 0xF00C 日志行（pos=代码位置/来源，frame=逻辑帧号——编辑器「调试信息面板」的位置/帧号列）
+#[derive(Debug, Clone)]
+pub struct LogEntry {
+    pub pos: String,
+    pub frame: u64,
+    pub text: String,
+}
+
 pub fn new_state() -> ControlRef {
     Arc::new(Mutex::new(ControlState {
         game: None,
@@ -53,7 +61,16 @@ pub fn new_state() -> ControlRef {
 
 /// 往编辑器控制台推一条日志（0xF00C NotifyEditorLog）
 pub fn push_log(state: &ControlRef, text: &str) {
-    state.lock().unwrap().pending_logs.push(text.to_string());
+    push_log_ex(state, "shell-host", 0, text);
+}
+
+/// 带位置/帧号的日志（lua 侧日志走这里）
+pub fn push_log_ex(state: &ControlRef, pos: &str, frame: u64, text: &str) {
+    state.lock().unwrap().pending_logs.push(LogEntry {
+        pos: pos.to_string(),
+        frame,
+        text: text.to_string(),
+    });
 }
 
 // ---------- 帧读写 ----------
@@ -85,8 +102,8 @@ fn send(s: &mut TcpStream, msg_type: u64, body: &[u8]) -> Result<()> {
     s.write_all(&f).map_err(|e| anyhow!("控制面发送失败: {e}"))
 }
 
-/// 0xF00C 日志帧：{f1 时间戳串, f2 level, f3 0, f4 位置串, f5 空, f6 内容, f7 项目名, f8 1}
-fn send_editor_log(s: &mut TcpStream, project: &str, text: &str) {
+/// 0xF00C 日志帧：{f1 时间戳串, f2 level, f3 帧号, f4 位置串, f5 空, f6 内容, f7 项目名, f8 1}
+fn send_editor_log(s: &mut TcpStream, project: &str, entry: &LogEntry) {
     let mut body = Vec::new();
     let ts = {
         let secs = std::time::SystemTime::now()
@@ -97,10 +114,10 @@ fn send_editor_log(s: &mut TcpStream, project: &str, text: &str) {
     };
     host::put_field_bytes(&mut body, 1, ts.as_bytes());
     host::put_field_varint(&mut body, 2, 1);
-    host::put_field_varint(&mut body, 3, 0);
-    host::put_field_bytes(&mut body, 4, b"shell-host");
+    host::put_field_varint(&mut body, 3, entry.frame);
+    host::put_field_bytes(&mut body, 4, entry.pos.as_bytes());
     host::put_field_bytes(&mut body, 5, &[]);
-    host::put_field_bytes(&mut body, 6, text.as_bytes());
+    host::put_field_bytes(&mut body, 6, entry.text.as_bytes());
     host::put_field_bytes(&mut body, 7, project.as_bytes());
     host::put_field_varint(&mut body, 8, 1);
     let _ = send(s, host::MSG_NOTIFY_EDITOR_LOG, &body);
@@ -154,8 +171,8 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
         // 先把积压日志推出去
         {
             let mut g = state.lock().unwrap();
-            for text in g.pending_logs.drain(..) {
-                send_editor_log(&mut s, &project, &text);
+            for entry in g.pending_logs.drain(..) {
+                send_editor_log(&mut s, &project, &entry);
             }
         }
         let frame = match read_frame(&mut s)? {
@@ -322,14 +339,16 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
 }
 
 /// 控制面监听线程体（game_host::run 拉起）
-pub fn run(port: u16, state: ControlRef, upload_root: PathBuf) -> Result<()> {
+/// stop 置位后退出（非阻塞 accept 轮询；game_host 停止/重启用）
+pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sync::atomic::AtomicBool>) -> Result<()> {
     let addr = format!("127.0.0.1:{port}");
     let listener = TcpListener::bind(&addr).map_err(|e| anyhow!("控制面监听失败 {addr}: {e}"))?;
+    listener.set_nonblocking(true)?;
     println!("[host-ctl] 控制面已监听 {addr}");
     let _ = std::fs::create_dir_all(&upload_root);
-    for conn in listener.incoming() {
-        match conn {
-            Ok(stream) => {
+    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+        match listener.accept() {
+            Ok((stream, _)) => {
                 let state = Arc::clone(&state);
                 let root = upload_root.clone();
                 std::thread::spawn(move || {
@@ -338,8 +357,12 @@ pub fn run(port: u16, state: ControlRef, upload_root: PathBuf) -> Result<()> {
                     }
                 });
             }
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
             Err(e) => println!("[host-ctl] accept 失败: {e}"),
         }
     }
+    println!("[host-ctl] 控制面已停止 {addr}");
     Ok(())
 }

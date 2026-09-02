@@ -137,6 +137,8 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **本地账号 = 合成凭证直通**：`login=1 + token=local-<userid> + token_type=11` 即可过客户端大厅自动登录闸门，**全程零网络零真实凭证**（玩家甲/乙 90000002/90000001 双开进局实证 2026-09-02）——这也是整体验收「断网+无凭证」的通行证。
 - **多账号正确性**：登录应答/0x102 模板按实际 userid 原位补丁（varint 等长；本地账号 userid 90000001 起分配在 4 字节 varint 区间）。
 - **PIE 验收（2026-09-02，lua 编排脑在线）**：编辑器「调试（本地服务器）」连 standalone `host start --local`（token=qwert 放行）→ 上传/EditorStartGame → lua 加载链 → PIE 客户端进局渲染（截图确认）→ 停止调试 0xF01B teardown → 第二局完整再接入。与官方本地调试完全同构。
+- **host 界面生命周期**：「本地服务器」标签页 启动/重启/停止 host（game_host STOP 信号 + 控制面非阻塞 accept 轮询退出；重启=等旧实例让出端口后 ensure_running）。
+- **0xF00C 位置/帧号**：编辑器「调试信息面板」的位置列=f4、帧号列=f3（我们曾写死 "shell-host"/0 被用户发现）。修复：lua 日志从 bgd 格式化文本抓 `[xxx.lua:NNN]` 进 f4，f3=逻辑帧计数（pump_frame 每帧 +1）；host 内部日志保持 pos="shell-host"。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 
