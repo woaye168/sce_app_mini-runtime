@@ -147,6 +147,36 @@ pub fn body_varint(body: &[u8], want_field: u32) -> Option<u64> {
     None
 }
 
+/// body 里读全部指定字段号的 wt2 嵌入消息（repeated message，如 EditorStartGame f12 依赖库表）
+pub(crate) fn body_msgs(body: &[u8], want_field: u32) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    let mut pos = 0;
+    while pos < body.len() {
+        let Ok(tag) = get_varint(body, &mut pos) else { break };
+        let field = (tag >> 3) as u32;
+        match tag & 7 {
+            0 => {
+                let _ = get_varint(body, &mut pos);
+            }
+            2 => {
+                let Ok(len) = get_varint(body, &mut pos) else { break };
+                let len = len as usize;
+                if pos + len > body.len() {
+                    break;
+                }
+                if field == want_field {
+                    out.push(body[pos..pos + len].to_vec());
+                }
+                pos += len;
+            }
+            5 => pos += 4,
+            1 => pos += 8,
+            _ => break,
+        }
+    }
+    out
+}
+
 // ---------- assign_host ----------
 
 #[derive(Debug, Clone)]

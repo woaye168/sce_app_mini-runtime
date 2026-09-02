@@ -418,7 +418,7 @@ fn cli_host(args: &[String]) {
                     .unwrap_or_else(|_| PathBuf::from("runtime"));
                 println!("项目 {project}，壳 host（真本地，无云端）启动...");
                 if let Err(e) = core::game_host::run(
-                    core::game_host::GameHostParams { port, runtime_dir },
+                    core::game_host::GameHostParams { port, runtime_dir, env_domain: env_domain.clone() },
                     None,
                 ) {
                     eprintln!("壳 host 退出: {e}");

@@ -263,6 +263,7 @@ impl DebugSession {
                 let port = crate::core::game_host::ensure_running(crate::core::game_host::GameHostParams {
                     port: 5003,
                     runtime_dir: params.runtime_dir.clone(),
+                    env_domain: params.env_domain.clone(),
                 })?;
                 log_warn(&format!("壳 host 已就绪: 127.0.0.1:{port}"));
                 host::HostInfo {

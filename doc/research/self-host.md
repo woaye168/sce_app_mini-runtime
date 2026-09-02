@@ -105,6 +105,30 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 
 **验收实录（2026-09-02）**：`debug start --host shell` 全链——控制面 EditorLogin/上传 1277 文件（逐文件 0xF010）/EditorStartGame → 客户端 KCP CE1 握手 → login result[0] → 客户端自驱加载 100% → 初始化消息群 → 客户端日志 "Game host notify loading finished / notify start game"（与官方会话逐行一致）→ 截图确认沙漠场景+HUD+角色渲染（玩法缺席为壳预期）。零 assign、零云端外联。
 
+## 9.6 ★★★ GameHost 编排复刻（真本地服务端，0.5.0 R4 交付）
+
+实现：`src/core/lua_host.rs`（mlua lua54 vendored 内嵌 VM + shim 面 + 自研 require 加载链）+ `src/core/cmsg_pack.rs`（cmsg_pack msgpack 变体 pack/unpack + lua 互转）+ `game_host.rs` 接线（起局建脑/登录玩家连入/0x7006 路由/出站 0x7008/50ms 帧泵/停局毁脑）。
+
+**开工先决两决策项**（需求 R4 要求记入提交说明）：① lua 宿主选型 = **mlua（lua54 + vendored）内嵌**进 mini-runtime 进程（game_host 线程持有 VM，单进程零 IPC；lua54 = 引擎同款语义：整除/位运算/goto/utf8）；② lua 运行时物理落盘 = **全部磁盘现读、零内嵌**（项目树 = 控制面落盘的 `runtime/User/host_upload/<project>/script/`；引擎库 = 载荷 `_m` 按 EditorStartGame f12 版本表；server_lua_plus 用本机明文包）。
+
+**消息路由**：c2h 0x7006 {f1: cmsg{type,args}} → `base.ui.proto[type](player, args)`（引擎内建通道 `__client_key_down/up` 不走 proto，由 host 原生转 玩家-按键按下/松开 事件——script-199 game.lua:517-525 实证）；服务端 `base.game:ui(name)(data)` 广播 / `player:ui(name)(data)` 定向 → 0x7008 {f1 cmsg(args), f2 seq, f3 type_id, f4 type_name（首现携带）}。**广播在无就绪会话时挂起、进图 burst 后补发**（官方「后进玩家拿世界状态」语义；BOSS 5s 首刷早于客户端接入则永久隐身——test_res002 实测）。
+
+**事件泵双形态**（官方语义泛化，非游戏特判）：`event_register` handler 位参直调（玩家-按键按下 = (trg, player, key)）；触发器 `add_event_common` handler 收 `(当前触发器, e 表)`（e={evt_name, player, key, key_keyboard}）。
+
+**踩坑记录（全部实机实证）**：
+- **mlua 0.10.5 `Vec<Value>` 传参吞前导 nil**：`f.call(vec![Nil, t, b])` 到 lua 侧第二参变 nil（独立探针 test/temp/mlua_probe 实证，已删）；必须 `Variadic::from_iter`。症状 = 事件 handler 第二参（playerObj）神秘为 nil。
+- **引擎 lua 词法器放行 ≥0x80 标识符**（TSTL 产物含中文参数名，global_default/lua_declare.lua:62）；stock lua54 拒绝 → 加载前 `sanitize_lua` 确定性改写 `_xHH`（字符串/注释不动、行号不变、同名同改）。
+- **`base.clock()` 单位 = 毫秒**（官方 timer.lua cur_frame 按 on_update(delta*1000) 步进）；`base.wait(timeout, cb)` timeout 同为毫秒。给秒则全部时间驱动逻辑慢 1000 倍（BOSS 首刷 5s 变 1.4 小时）。
+- **TSTL 类壳必须真实现**：`__TS__Class2/ClassExtends/SuperTypeArgumentsFuncWrapper`（prototype 链/____constructor/__call 实例化），lua_declare.lua 全量建类链，弱桩即炸。
+- **`base.tsc.CLASSES.os` 必须预置真 os 库**：TSTL 产物 `os = CLASSES.os or __TS__Class2("os")` 覆盖全局 os；缺则 os.time 全灭（ShopSystem 限购/同步全炸，商店货币显示 0）。
+- **`require('<dir>')` = `<dir>/init.lua`**（包目录约定，bgd_game_server 等）。
+- **`Lua::unsafe_new()` 全库**（bgd log 模块用 debug.traceback）。
+- **eff.cache 返回值补 Formulas 空表**：官方 cache 有 schema 默认值注入，obj 裸数据没有（trigger_validator 直接 `data.Formulas.X = fn`）。
+- **cmsg_pack lua→线 数组判定必须「键恰好 1..=n 无额外键」**：`raw_len()` 只量连续前缀，稀疏整数键表（商店 bought={1..4,11..32}）误判数组丢尾部 → 客户端稀疏键读取全落空（每日/每周/每月已售罄不更新，特惠 1-4 正常——test_res002 实测对照）。
+- **排障打点**：game_host 出站首现类型 println（载荷 cmsg_pack::debug_short 预览）；`玩法上行未注册 handler` 每类型记一次。
+
+**验收实录（2026-09-02，test_res002 全脱机进局人工游玩）**：lua 加载链完整（bgd 四端初始化 + BagSystem/ShopSystem/GMSystem/GameServer/草丛连通区域 63）→ 玩家上线（OnPlayerJoin 全量执行）→ 移动校验（Req_PlayerMove 到达、越距拒绝+回拉）、攻击、技能（黑幕/解药恢复 102）、背包（拆分/获得/锻造/交换）、商店（GM 发放 money/gem → 各标签购买成功：free/money/gem 三货币 + 日/周/月限购 + 限量买完按钮变「已售罄」人工确认）、组队（创建队伍）、F1 触发器（`Srv_Verify_Key F1 ok` × N）、刷怪（BOSS 按点刷新 + 技能书刷取/超时循环 + 帧驱动回血 hp 95→200）→ 客户端截图渲染确认。**零 assign、零云端外联**。多人未验（待多客户端支持）。
+
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 
 数据源：中继全流量 capture（`host_capture-*.jsonl`，双会话：外部客户端 conv=0x14 + PIE conv=0x15）。

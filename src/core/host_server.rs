@@ -36,6 +36,8 @@ pub struct GameInfo {
     pub project: String,
     pub session_id: u64,
     pub upload_dir: PathBuf,
+    /// 依赖库表（EditorStartGame f12：(库名, 版本)；R4 lua host 解析 @lib_* 用）
+    pub libs: Vec<(String, String)>,
 }
 
 pub type ControlRef = Arc<Mutex<ControlState>>;
@@ -271,18 +273,29 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
             }
             host::MSG_EDITOR_START_GAME => {
                 let proj = host::body_string(&parsed.body, 1).unwrap_or_default();
+                // f12 repeated 依赖库 {f1 版本, f2 库名}（R4 lua host 解析 @lib_* 用）
+                let libs: Vec<(String, String)> = host::body_msgs(&parsed.body, 12)
+                    .iter()
+                    .map(|m| {
+                        let ver = host::body_string(m, 1).unwrap_or_default();
+                        let name = host::body_string(m, 2).unwrap_or_default();
+                        (name, ver)
+                    })
+                    .filter(|(n, _)| !n.is_empty())
+                    .collect();
                 let session_id = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
                     .map(|d| d.as_millis() as u64)
                     .unwrap_or(0)
                     | 0x1000_0000_0000_0000; // 高位标记，避免与官方 id 混淆
-                println!("[host-ctl] EditorStartGame: {proj} → session {session_id}");
+                println!("[host-ctl] EditorStartGame: {proj} → session {session_id}（依赖库 {} 个）", libs.len());
                 {
                     let mut g = state.lock().unwrap();
                     g.game = Some(GameInfo {
                         project: proj.clone(),
                         session_id,
                         upload_dir: upload_root.join(&proj),
+                        libs,
                     });
                     g.teardown = false;
                 }

@@ -15,6 +15,7 @@ use crate::core::host;
 use crate::core::host_server::{self, ControlRef, GameInfo};
 use crate::core::host_templates as tpl;
 use crate::core::kcp_server::{Event, KcpServer};
+use crate::core::lua_host::LuaBrain;
 use crate::core::zcompress;
 use anyhow::Result;
 use std::path::PathBuf;
@@ -23,6 +24,8 @@ use std::time::{Duration, Instant};
 
 /// tick 周期（官方实测 ~200ms）
 const TICK_INTERVAL: Duration = Duration::from_millis(200);
+/// lua 事件泵帧周期（游戏-帧，官方 50ms）
+const FRAME_INTERVAL: Duration = Duration::from_millis(50);
 /// 游戏会话 id（壳 host 固定为基准 capture 的值：登录应答模板/__sync_game_info/0x1108 回显三处自带它，
 /// 客户端 ping 校验「发送==接收」——固定即免补丁。R4 换真实生成）
 const GAME_SESSION_ID: u64 = 7680844811838488582;
@@ -32,6 +35,8 @@ pub struct GameHostParams {
     pub port: u16,
     /// 运行时目录（上传落盘 = <runtime>/User/host_upload/<project>/）
     pub runtime_dir: PathBuf,
+    /// 环境域名（载荷 _m 定位 = <runtime>/Update/<域>/Res/_m；R4 lua host 用）
+    pub env_domain: String,
 }
 
 /// 单个游戏会话的编排状态
@@ -94,14 +99,75 @@ fn build_message(msg_type: u64, body: &[u8]) -> Vec<u8> {
 }
 
 /// 进图初始化消息群（模板原序，跳过登录应答对；tick 模板由 tick 循环接管故跳过）
-fn send_burst(kcp: &mut KcpServer, conv: u32) {
+/// lua 编排活跃时 0x7008 模板让位（UI 同步由 lua 侧 base.game:ui 驱动）
+fn send_burst(kcp: &mut KcpServer, conv: u32, lua_active: bool) {
     for &(ty, hexs) in tpl::H2C_SEQ.iter().skip(2) {
         if ty == 200711 {
             continue; // 0x31007 tick 由周期循环持续下发
         }
+        if lua_active && ty == 0x7008 {
+            continue; // lua 编排接管玩法下发
+        }
         let body = tpl::unhex(hexs);
         let frame = build_message(ty, &body);
         kcp.send(conv, &frame);
+    }
+}
+
+/// lua 出站 → 0x7008 {f1 cmsg(args), f2 seq, f3 type_id, f4 type_name（首现携带）}（线格式 §13.9）
+/// 广播时无已进图会话 → 进 pending 队列（官方语义：后进玩家也拿到世界状态——BOSS 5s 首刷早于客户端
+/// 接入会永久隐身，test_res002 实测；队列上限 2000 防爆内存，溢出丢最旧）
+fn send_lua_out(
+    kcp: &mut KcpServer,
+    brains: &std::collections::HashMap<u32, SessionBrain>,
+    b: &LuaBrain,
+    m: &crate::core::lua_host::OutMsg,
+    pending_broadcast: &mut std::collections::VecDeque<Vec<u8>>,
+) {
+    let (type_id, first) = b.type_id_of(&m.type_name);
+    let seq = b.alloc_seq();
+    let mut body = Vec::new();
+    host::put_field_bytes(&mut body, 1, &m.args);
+    host::put_field_varint(&mut body, 2, seq);
+    host::put_field_varint(&mut body, 3, type_id as u64);
+    if first {
+        host::put_field_bytes(&mut body, 4, m.type_name.as_bytes());
+    }
+    let frame = build_message(0x7008, &body);
+    // 出站首现类型打点（排障用：确认消息离站 + 载荷预览）
+    {
+        use std::sync::OnceLock;
+        static SEEN: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+        let set = SEEN.get_or_init(|| Mutex::new(std::collections::HashSet::new()));
+        if set.lock().unwrap().insert(m.type_name.clone()) || m.type_name == "Sync_ShopData" {
+            let preview = crate::core::cmsg_pack::unpack(&m.args)
+                .map(|(v, _)| crate::core::cmsg_pack::debug_short(&v))
+                .unwrap_or_else(|| "<非 cmsg>".into());
+            println!("[game-host] 出站首现 {} → {}", m.type_name, preview);
+        }
+    }
+    match m.target_uid {
+        None => {
+            // 广播（base.game:ui）：全部已进图会话；无人就绪则挂起待补
+            let mut delivered = false;
+            for br in brains.values() {
+                if br.burst_done {
+                    kcp.send(br.conv, &frame);
+                    delivered = true;
+                }
+            }
+            if !delivered {
+                if pending_broadcast.len() >= 2000 {
+                    pending_broadcast.pop_front();
+                }
+                pending_broadcast.push_back(frame);
+            }
+        }
+        Some(uid) => {
+            if let Some(br) = brains.values().find(|br| br.userid == uid as u64) {
+                kcp.send(br.conv, &frame);
+            }
+        }
     }
 }
 
@@ -154,6 +220,12 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
     let _ = kcp_alt; // 暂不合并（客户端只 dial +50）
     let mut brains: std::collections::HashMap<u32, SessionBrain> = std::collections::HashMap::new();
     let mut game: Option<GameInfo> = None;
+    /// R4 lua 编排脑（起局时建、停局时毁；加载失败回退 R3 壳行为）
+    let mut lua: Option<LuaBrain> = None;
+    let mut last_frame = Instant::now();
+
+    /// 无就绪会话时挂起的广播帧（进图 burst 后补发，详见 send_lua_out 注释）
+    let mut pending_broadcast: std::collections::VecDeque<Vec<u8>> = std::collections::VecDeque::new();
     host_server::push_log(&state, "[shell-host] 自研壳 host 已启动（0.5.0 R3）");
     println!("[game-host] 壳 host 已监听 TCP {} + UDP {}/{}，等待接入", params.port, params.port, params.port + 50);
     if let Some(tx) = ready_tx {
@@ -177,6 +249,8 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
         }
         if do_teardown {
             println!("[game-host] 停局 teardown：清理全部会话");
+            lua = None;
+            pending_broadcast.clear();
             for conv in brains.keys().copied().collect::<Vec<_>>() {
                 kcp.close(conv);
             }
@@ -185,6 +259,25 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
         }
         if let Some(info) = new_game {
             println!("[game-host] 起局: {} session={}", info.project, info.session_id);
+            // R4：起 lua 编排脑（失败回退 R3 壳行为，不阻断进图）
+            let script_dir = info.upload_dir.join("script");
+            lua = match LuaBrain::new(
+                script_dir,
+                &params.runtime_dir,
+                &params.env_domain,
+                &info.libs,
+                &info.project,
+            ) {
+                Ok(b) => {
+                    host_server::push_log(&state, "[game-host] lua 编排已就绪（0.5.0 R4）");
+                    Some(b)
+                }
+                Err(e) => {
+                    println!("[game-host] lua 编排加载失败（回退壳模式）: {e}");
+                    host_server::push_log(&state, &format!("[game-host] lua 加载失败，回退壳模式: {e}"));
+                    None
+                }
+            };
             host_server::push_log(&state, "[shell-host] 起局，等待客户端 KCP 接入");
             game = Some(info);
         }
@@ -209,6 +302,10 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                                 kcp.send(conv, &frame);
                             }
                             host_server::push_log(&state, &format!("[shell-host] 玩家 {} 登录", brain.userid));
+                            // R4：玩家-连入事件
+                            if let Some(b) = &lua {
+                                b.player_join(brain.userid as i64, &format!("玩家{}", brain.userid));
+                            }
                         }
                         3 => {
                             brain.progress = host::body_varint(&mbody, 1).unwrap_or(0) as u32;
@@ -218,13 +315,28 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                             if !brain.burst_done {
                                 brain.burst_done = true;
                                 println!("[game-host] 客户端加载完成，发送初始化消息群");
-                                send_burst(&mut kcp, conv);
+                                send_burst(&mut kcp, conv, lua.is_some());
+                                // 补发接入前挂起的广播（BOSS/技能书等先于玩家刷出的世界状态）
+                                if !pending_broadcast.is_empty() {
+                                    let n = pending_broadcast.len();
+                                    for frame in pending_broadcast.drain(..) {
+                                        kcp.send(conv, &frame);
+                                    }
+                                    println!("[game-host] 补发挂起广播 {n} 条");
+                                }
                                 host_server::push_log(&state, "[shell-host] 客户端进图，初始化消息群已下发");
                             }
                         }
                         0x2000 => {}   // 心跳：无需应答
                         0x6011 => {}   // UI 视图同步：收到即弃
-                        0x7006 => {}   // 玩法上行：R3 壳无玩法（R4 接入 lua）
+                        0x7006 => {
+                            // 玩法上行 {f1: cmsg{type,args}} → R4 lua 路由 base.ui.proto[type](player, args)
+                            if let Some(b) = &lua {
+                                if let Some(cmsg) = host::body_msgs(&mbody, 1).into_iter().next() {
+                                    b.on_client_msg(brain.userid as i64, &cmsg);
+                                }
+                            }
+                        }
                         0x1001 => {
                             // 周期探测 → 0x1108 应答
                             let probe = host::body_varint(&mbody, 1).unwrap_or(0);
@@ -240,6 +352,12 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                 }
                 Event::Closed { conv } => {
                     println!("[game-host] KCP 会话结束 conv={conv:#x}");
+                    // R4：玩家-断线事件
+                    if let (Some(b), Some(br)) = (&lua, brains.get(&conv)) {
+                        if br.userid != 0 {
+                            b.player_leave(br.userid as i64);
+                        }
+                    }
                     brains.remove(&conv);
                 }
             }
@@ -249,6 +367,19 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
             if brain.burst_done && brain.last_tick.elapsed() >= TICK_INTERVAL {
                 send_tick(&mut kcp, brain);
                 brain.last_tick = Instant::now();
+            }
+        }
+        // R4 lua 编排：帧泵（50ms）+ 出站 0x7008 + 日志推送（0xF00C）
+        if let Some(b) = &lua {
+            if last_frame.elapsed() >= FRAME_INTERVAL {
+                b.pump_frame();
+                last_frame = Instant::now();
+            }
+            for m in b.drain_out() {
+                send_lua_out(&mut kcp, &brains, b, &m, &mut pending_broadcast);
+            }
+            for l in b.drain_logs() {
+                host_server::push_log(&state, &format!("[lua:{}] {}", l.level, l.text));
             }
         }
         std::thread::sleep(Duration::from_millis(5));

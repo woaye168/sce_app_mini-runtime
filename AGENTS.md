@@ -27,7 +27,9 @@ src/core/host.rs       # 调试 host 控制协议（EditorLogin/上传/起局/ho
 src/core/local_host.rs # 自建 host（中继模式）：TCP 控制面中继 + UDP KCP NAT（会话端口=控制端口+50）+ 全流量 capture
 src/core/kcp_server.rs  # KCP 会话面服务端（CE1 握手 + KCP 服务端 + 3B 流分帧，单会话，§13.1-13.3）
 src/core/host_server.rs # 自研 host 控制面 TCP 服务端（0xF000 段：登录/逐文件 0xF010 ack/起局/0xF00C 日志/0xF01B teardown）
-src/core/game_host.rs   # 壳 host 编排（0.5.0 R3：登录应答+初始化消息群+tick/时钟/探测应答；R4 将换入 lua 编排）
+src/core/game_host.rs   # 真本地 host 编排（R3 壳：登录应答+初始化消息群+tick/时钟/探测应答；R4：lua 编排脑接线——起局建脑/0x7006 路由/0x7008 出站/帧泵/广播挂起补发）
+src/core/lua_host.rs    # lua 宿主（0.5.0 R4）：mlua lua54 vendored 内嵌 VM + shim 面 + 自研 require 加载链（sanitize_lua ≥0x80 标识符清洗）
+src/core/cmsg_pack.rs   # cmsg_pack（msgpack 变体）pack/unpack + lua 值互转（零依赖）
 src/core/host_templates.rs # AUTO-GENERATED：官方 h2c 消息序列模板（kcp_capture_parse `export` 从基准 capture 提取）
 src/core/zcompress.rs  # ZCompress 复刻（h2c 传输层压缩，纯算法零依赖；格式权威 = doc/research/scegame-reverse.md §13.8）
 src/core/payload.rs    # 载荷同步：update-info + OSS 下载 + TNND/UPAK 落位 + 注册表合成 + 基座资产
@@ -57,6 +59,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 - **spawn 防卡死**：游戏进程必须用裸 `CreateProcessW(bInheritHandles=FALSE)` 拉起——std Command 会让游戏继承调用方管道句柄，导致管道对端工具等 EOF 卡死到游戏关窗。
 - **B 模式永远带 `-no_update`**：否则 scegame 会自更新并清掉组装好的载荷。
 - **自建 host（中继模式，local_host.rs）**：`debug start --host cloud|local`（CLI）与调试页「host 模式」下拉（GUI）可选，默认云端直连。local = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 会话抓包平台：c2h 明文 protobuf/cmsg_pack 可直读，h2c=ZCompress 压缩无加密，见 doc/research/scegame-reverse.md §13）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
+- **真本地 host（0.5.0 R3+R4，game_host.rs + lua_host.rs）**：`debug start --host shell` / `host start --shell`（PIE 同口）。R3 壳 = 登录/初始化消息群模板 + tick/时钟/探测应答；R4 = mlua lua54 内嵌 VM 跑项目服务端 lua（决策：内嵌 + 磁盘现读零内嵌），0x7006→`base.ui.proto[type]` 路由、`game:ui`/`player:ui`→0x7008 出站、事件泵（游戏-帧 50ms/玩家-连入/断线/按键内建通道 __client_key_down/up）、广播无就绪会话挂起补发。shim 面/踩坑全集 = self-host.md §9.6（**base.clock() 是毫秒**；mlua `Vec<Value>` 传参吞前导 nil 必须 `Variadic::from_iter`；引擎 lua 放行 ≥0x80 标识符需 sanitize_lua 清洗）。
 
 ## 工具集（examples/，全部 cargo examples）
 

@@ -1,6 +1,7 @@
 //! 业务核心模块
 pub mod auth;
 pub mod capture;
+pub mod cmsg_pack;
 pub mod debug;
 pub mod host;
 pub mod local_host;
@@ -11,6 +12,7 @@ pub mod kcp_server;
 pub mod locate;
 pub mod login;
 pub mod login_state;
+pub mod lua_host;
 pub mod payload;
 pub mod runtimes;
 pub mod staging;
