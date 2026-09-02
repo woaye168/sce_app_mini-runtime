@@ -139,6 +139,7 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **PIE 验收（2026-09-02，lua 编排脑在线）**：编辑器「调试（本地服务器）」连 standalone `host start --local`（token=qwert 放行）→ 上传/EditorStartGame → lua 加载链 → PIE 客户端进局渲染（截图确认）→ 停止调试 0xF01B teardown → 第二局完整再接入。与官方本地调试完全同构。
 - **host 界面生命周期**：「本地服务器」标签页 启动/重启/停止 host（game_host STOP 信号 + 控制面非阻塞 accept 轮询退出；重启=等旧实例让出端口后 ensure_running）。
 - **0xF00C 位置/帧号**：编辑器「调试信息面板」的位置列=f4、帧号列=f3（我们曾写死 "shell-host"/0 被用户发现）。修复：lua 日志从 bgd 格式化文本抓 `[xxx.lua:NNN]` 进 f4，f3=逻辑帧计数（pump_frame 每帧 +1）；host 内部日志保持 pos="shell-host"。
+- **踩坑（2026-09-03，v0.5.0 回归 bug）**：**Windows 下 `listener.set_nonblocking(true)` 后 accept 出的套接字继承非阻塞标志**（与 Unix 不同！），handle_conn 阻塞读帧即 10035 WSAEWOULDBLOCK → 服务端断连 → 客户端报 10053「你的主机中的软件中止了一个已建立的连接」。修复：accept 后显式 `stream.set_nonblocking(false)`。教训：控制面为支持停止改非阻塞 accept 轮询时，必须记得还原连接套接字。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 

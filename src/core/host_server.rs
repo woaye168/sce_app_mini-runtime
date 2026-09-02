@@ -349,6 +349,12 @@ pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sy
     while !stop.load(std::sync::atomic::Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, _)) => {
+                // Windows 下 accept 的套接字会继承 listener 的 nonblocking 标志，
+                // 必须显式还原为阻塞模式，否则 handle_conn 读帧即 10035 WSAEWOULDBLOCK 断连
+                if let Err(e) = stream.set_nonblocking(false) {
+                    println!("[host-ctl] 还原阻塞模式失败: {e}");
+                    continue;
+                }
                 let state = Arc::clone(&state);
                 let root = upload_root.clone();
                 std::thread::spawn(move || {
