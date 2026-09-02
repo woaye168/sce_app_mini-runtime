@@ -1,0 +1,156 @@
+# 自建 host 可行性研究（2026-09-02）
+
+> 目标：mini-runtime 实现完整「自建 host」（替代官方云端调试 host），云端 host 保留为界面可选项。
+> 方法：静态考古（sceengine.dll 字符串 / xdeditor-160 / script-199 / client_base-78 明文）+ update-info 通道探测 + 实机实验（编辑器补丁 MCP 驱动）。
+> **一句话结论：控制面可完整自建（已实证）；会话面（KCP 游戏会话）协议未逆向但可抓包；服务端运行时（跑服务端 lua 的引擎）经全部可得渠道证实拿不到——这是「纯本地完整 host」的硬卡点。**
+
+## 1. 自建 host 的三层组成与现状
+
+| 层 | 内容 | 现状 |
+| --- | --- | --- |
+| 控制面 | TCP 5003，0xF000 段协议（EditorLogin/上传/起局/日志回推/心跳/销毁） | **已完整逆向并实证可自建**（scegame-reverse.md §8；editor-patch examples/host_stub.rs 全链跑通编辑器侧） |
+| 会话面 | KCP（UDP）游戏会话：客户端进局握手/login(userid)/地图加载/状态同步 | 协议未逆向（2026-09-02 前未抓包）；帧头线索 `4C .. .. .. 51/52`（cloudvar-lowlevel.md:270） |
+| 服务端运行时 | 跑地图 script/main.lua 服务端半身的引擎（host.exe = NE 引擎 server 构建 + GameHost.lua + server_common/server_lua_plus 包） | **不可得（本文 §4 五条独立证据）** |
+
+## 2. 控制面接入点（实锤）
+
+- 编辑器「调试(本地服务器)」（inner 菜单，menu_bar.lua:2124）/ argv `use_local_host`（map_starter/init.lua:111）= 固定连 `127.0.0.1:5003`，token 写死 `'qwert'`。
+- **编辑器侧没有任何按需拉起本地 host 的逻辑**（2026-09-02 实机实验：5003 空监听下触发本地服务器调试，`update_host` 直接返回 ret=-3 管线中止；全程无进程拉起、无目录创建）——5003 的对端完全由外部提供，即自建 host 的官方接入点。
+- use_local_host 模式下 PIE 客户端拿到 `-host_ip=127.0.0.1 -host_port=5003`（editor-patch 侧实证），即游戏会话也指向同一端口（TCP 控制 + UDP/KCP 会话同端口号并存）。
+
+## 3. 编辑器/客户端引擎不含 server 半身（字符串实证）
+
+sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `test\temp\test_strings_gameplay.txt`）：
+
+- GamePlay 类全集 = `GamePlayBase / GamePlayLocal / GamePlayOnline / GamePlayLobby / GamePlayLive / GamePlayReplay / GamePlayInEditor`——**全是客户端形态，无 GamePlayServer**。
+- 网络消息处理器只注册了 host→client 方向：`NetEventHandlerImpl2<GamePlayBase, _ACGame_Protocol_GameHostServer_*>`（CameraFocus/FovModeChange/SightChange/SyncUnitAttributeConfig/UnitEvent/UnitModelUpdate/UnitOwnerChanged/UnitParticleUpdate/UnitStateMachineTransit/UnitStateMachineUpdate）；client→host 方向的 handler 注册不在此二进制（在 server 构建里）。
+- KCPNetwork 实现完整在客户端（`[kcp] KCP will connect to %s:%d` 等，源路径 `D:\BuildPC\NE_pd\Client\src\Game\Network\UDP\KCPNetwork.cpp`）。
+- host 相关字符串：`bin-release/host.exe`、启动模板 `-d -startupmode=2 -nogfw -noserviceagent -port=%d -config_path="%s?.lua" -log_folder="%s" -lua_log_on_console`、`/GameHost.lua`、`/server/gamehost/`、`User/server/gamehost/config/`、`GameHostServerLauncher`（copy/CreateDir/DeleteDir 错误串）、`/data/GameHostIP`、`/data/GameHostPort`。
+- xdeditor lua 层对 host 编排零参与（gamehost/GameHost/host.exe 全库 0 命中）；`DebugManager` 全为 native 绑定。
+
+## 4. 服务端运行时不可得（五条独立证据，2026-09-02）
+
+1. **本地全盘无**：`D:\sce_online\**\host.exe` 与 `**\gamehost\**` glob 零命中；`GameHost.lua` 不在任何客户端载荷。
+2. **pak 内无**：Update Res 下 4 个 pak（fonts/uistyle/xdeditor/xdeditor_startup，含 TNND 解密后）grep `gamehost|GameHost` 全不命中；script-199/client_base-78 明文镜像同样 0 命中。
+3. **update-info 无 host 二进制**：`variation=server` 变体真实存在（见 §5），但 `list=host/gamehost` 返回空 ref_items（包不存在）。
+4. **server 包 OSS ACL 拦截**：server_common/174、server_lua_plus/14、global_default/60、甚至地图 p_55a3/1 的 server.zip 全部列得出但下载 403 `AccessDenied: bucket acl`（代理/直连均拒）——sce-maps-pd-backend 桶不公开，官方 host 在阿里云内网拉取。
+5. **引擎不会自举 host**：debug_via_remote=0 实机实验（§6）证明本地没有任何可用的 server 启动路径；`GameHostServerLauncher` 建的 config 目录为空（copy 源不存在）。
+
+## 5. ★ update-info `variation=server` 通道（新发现）
+
+`POST https://updater-pd.tapsce.cn/api/map/update-info?...&variation=server` 返回**服务端构建包**（bucket = `sce-maps-pd-backend`，文件名 `server.zip`）：
+
+- `server_common` v174（449KB）、`server_lua_plus` v14、各依赖库（lib_control/defaultui/spark_core/lib_ui…）与地图本体（p_55a3 v1, packet_type=1）都有 server 构建；
+- 查地图名时 ref_items 自动带出 `server_common@174 + server_lua_plus@14 + global_default@60`（与 EditorStartGame f12 固定三库一致，互为印证）；
+- 下载被 bucket ACL 拦截（§4.4）。若未来拿到可读凭证，此通道 = 服务端 lua 栈的完整来源。
+
+## 6. ★ debug_via_remote=0 实机实验（2026-09-02）
+
+方法：编辑器运行时 `common.add_argv('debug_via_remote','0')`（native argv 存活着读，menu_bar.lua:56 的 lua 本地变量仍是加载期的 true）→ 触发「调试/调试」。
+
+实录：
+
+1. lua 侧照常 assign_host（106.14.95.227:13170）+ update_host ret=0（云控制连接建立）；
+2. **native debug_game 读到 argv=0 → GameHostServerLauncher 激活** → 创建 `D:\sce_online\User\server\gamehost\config\`（空目录，copy 源不存在）；
+3. 无 host.exe 拉起、无新监听端口、无 server 进程；
+4. PIE 客户端进程被拉起（lua-game 日志文件创建）但**日志 0 字节**——客户端没有可连的 host，进局失败。
+
+结论：`debug_via_remote=0` = 「host 由本地 GameHostServerLauncher 拉起 host.exe」的官方内部开发路径，**正式版环境因缺 host.exe 与 server config 源而必然失败**。GameHostServerLauncher 的契约（copy config → 拉 `bin-release/host.exe -port=%d -config_path=...`）即官方本地 host 的集成面。
+
+## 7. server VM 契约（供未来实现参考）
+
+服务端 lua 在 host.exe 的 lua VM 里跑，加载链与客户端同构（common/init→main→base/init），差异层由 server_common 包提供（`base.game:ui` / `player:ui` / 服务端收包回调等，客户端包里没有）。host 必须提供的 native 面（据 script-199/client_base-78 对称性推断 + 调用点实证）：
+
+- 消息层：cmsg_pack.pack/unpack、ui_message 双向投递（客户端侧对称物 `base.event.on_ui_message(_new)`，script/common/base/server.lua:193/214）、`game.send_ui_message` 的服务端镜像、`base.event.on_server_clock(clock)` 心跳驱动（server.lua:67）、`base.event.on_update` 帧驱动；
+- 运行时公共件：log/log_file、common.*（has_arg/get_argv/...）、include/require_folder、`__lua_state_name`、`__MAIN_MAP__`、lni；
+- 世界模拟层（最大）：数编表、单位创建/属性同步/视野、场景管理——本质是引擎 GamePlay 的服务端半身。
+
+## 8. 可行架构选项
+
+- **A. 中继 host（本地门面 + 云端芯）**：自建进程监听 5003（TCP 控制面完整实现 + UDP KCP 按客户端源端口做 NAT 式转发到 assign_host 分配的云 host）。编辑器/客户端全部指本地，玩法真实。价值 = 统一入口/全流量可观/为真本地化占位；**不脱机**。**✅ 已实现并端到端验证（§9）**。
+- **B. 壳 host（脱机但无玩法）**：控制面 + 自研 KCP 最小会话（login/start/scene），客户端能进图渲染但服务端逻辑缺席（Req_* 无人处理）。前置 = KCP 会话协议抓包逆向（frida_capture 抓真实调试局的 UDP 流量）。bgd 游戏的服务端驱动度高，空壳客户端很快卡在等同步。
+- **C. 真本地 host（完整脱机）**：需要 host.exe（或等价 server 引擎）+ server 包，§4 已证全部渠道拿不到。**当前不可行**，除非官方开放 server 包下载或分发 host 二进制。
+
+## 9. ★ 中继 host 端到端验证（2026-09-02，M1~M3 交付）
+
+实现：`src/core/local_host.rs`（TCP 控制面协议感知中继 + UDP KCP NAT + 全流量 jsonl capture），CLI `host start` / `debug start --host local`，GUI 调试页 host 模式下拉（云端直连默认保留）。
+
+**关键协议发现——KCP 会话端口 = 控制端口 + 50（引擎硬编码）**：
+
+- 中继首版只监听 UDP 5003，客户端 Network 落实锤：`KCP will connect to 127.0.0.1:5053`（命令行 `-host_port=5003`，引擎自行 +50）；云端对照 `13738→13788` 同规律。
+- 症状：5053 无监听 → ICMP 不可达 → 客户端 `recvfrom() error 10054` 刷屏 → `kcp connect failed at 4.010000` → **lua VM 不起**（lua-game 0 字节）。KCP 建连是 lua 启动的前置闸门。
+- 修复：UDP 双端口监听（5003/5053），5053 转发到 `cloud.port + 50`。
+
+**验证结果（两条入口链路全绿）**：
+
+| 入口 | 链路 | 结果 |
+| --- | --- | --- |
+| `debug start --host local` | CLI → 中继 → assign → 上传 312 文件 → 起局 → 外部客户端 KCP 127.0.0.1:52532→106.14.95.227:20820 | 客户端 lua-game 正常（on_enter_game/技能下发/Sync_PlayerStats），截图确认进局渲染完整 |
+| 编辑器「调试(本地服务器)」 | 菜单（token=qwert 本地放行）→ 中继换真 token → 云端 → PIE KCP 127.0.0.1:53030→20820 | lua.game_info=StateGame，capture_game 截图确认 PIE 进局 |
+
+**排障纪律**：assign/云连接失败必须回 0xF001 result≠0，否则编辑器 `co.call(DebugManager.update_host)` 永远悬挂卡死调试管线（已内建 login_fail 闭包）。
+
+## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
+
+数据源：中继全流量 capture（`host_capture-*.jsonl`，双会话：外部客户端 conv=0x14 + PIE conv=0x15）。
+分析工具：`examples/kcp_capture_parse.rs`（stats/flow；本机缺 libclang 时 rustc 直编，文件头有命令）。
+
+**① 握手（明文 ASCII 魔法）**：
+
+```
+c→h  CE1SYN    (13B: magic + 00 00 01 63 b8 03 05，重发至应答)
+h→c  CE1SYACK  (16B: magic + conv(4 LE) + 时间戳?)   ← 服务器下发 conv
+c→h  CE1ACK    (6B)
+h→c  CE1SYNACK (16B: magic + conv + 00 00 00，重发至首个 PUSH)
+```
+
+**② KCP 层**：标准 KCP 头（conv/cmd/frg/wnd/ts/sn/una/len，全 LE），cmd 0x51=PUSH / 0x52=ACK；每客户端独立 conv（0x14/0x15 递增）。
+
+**③ 流式分帧**：客户端带 `-kcp_stream` 时，PUSH payload = **3 字节 LE 长度前缀（= KCP len）+ 消息体**。
+
+**④ c2h（客户端→host）= 明文 protobuf**：外壳 `f1{ f1 varint msg_type, f2 bytes body }`。已识别 msg_type：
+
+| msg_type | 语义 | body |
+| --- | --- | --- |
+| 1 | 登录 | {f1 userid, f2 "userid" 字符串, f6 "", f7=1, f8=1} |
+| 3 | 进度/加载 | {f1 = 递增值 30/45/95/100} |
+| 5 | 状态 | {f1 = 0} |
+| 0x2000 | 周期心跳（~0.5s） | {f1 i32, f2 i32}（常为 0,0） |
+| 0x6011 | UI 视图同步 | {f1..f5, f6="ui-61-nil" / "main[map_view]>P0>P0"（UI 路径）, f8 hash} |
+| 0x7006 | **玩法协议** | {f1 varint, f2 bytes = MessagePack `{type:"Req_PlayerList", args:[]}`} |
+| 0xF100 | 时钟同步 | {f1 {f1=unix_ms, f2=conv}} + f2 double |
+
+**⑤ h2c（host→客户端）= 加密/混淆**：登录后全部消息高熵（无 protobuf/msgpack 结构，首字节无固定模式，非已知压缩魔数）。算法/密钥派生未定——疑似流加密，密钥疑在登录期派生（c2h 全程明文、h2c 密文的非对称设计）。**这是 B（壳 host）/C（真本地 host）路线的下一个攻关点**：脱壳/Hook 客户端进程加解密函数（KCPNetwork 收包路径，lua_api_dump 可辅助定位）。
+
+**对架构选项的影响**：c2h 明文 + msgpack 玩法协议意味着「伪造客户端」廉价（oracle 探测服务端 API 面可直接手写 KCP 客户端发包）；「伪造 host」则需先破 h2c 加密。
+
+## 11. ★ 云 host oracle：server VM API 面实证（2026-09-02，M5）
+
+方法：游戏服务端挂临时探针（`src/server/api_probe.lua`，log.info 输出 → 0xF00C 回读，用后已还原），在云端真实 host 里 dump server VM 全局。原始 dump 留档 `test/temp/probe-lines.txt`。
+
+**实证结论（阿叶三条线索全部坐实）**：
+
+- `_G`：`__IN_HOST__=1`、`__MAIN_MAP__/__GAME_ID__=p_55a3`、`bgd_api`、`score`、`cmsg_pack`、`autotest_log`、`os`（5 函数阉割版）、`io`（7 函数阉割版）。
+- **server_common 的 require 根 = `@common`**（package.loaded 368 模块实证：`@common/base/**` 全家桶）——与客户端 script 包同根同构（线索 2）；**server_lua_plus 的加载形态 = `@lua_plus/base/base_lua_plus/**`**（42 个触编 API 模块，与本地明文包 `D:\sce_online\...\server_lua_plus\14\` 一一对应，线索 1）。
+- `base`（977 键）= 服务端触编 API 全集（unit_*/skill_*/buff_*/score_*/quest_*/mover_* 等，即 server_lua_plus 挂载点）；`base.game`（130 方法）= 服务端游戏对象（create_scene_copy/close_scene/get_session_id/get_server_tag/keep_alive/end_game/set_winner/select_hero/**message**/**ui**/init_units/load_scene 等）；`base.auxiliary`（23）；`base.ui`={bind,proto}；`score`（29，云变量/排行榜）。
+- 上传的地图包挂 `@p_55a3/`：`bgd_game_server/**`（游戏服务端）+ `bgd_libs_server/**` + `obj/**`（数编表）+ `scene/default/area_save`。
+
+**GameHost 复刻量评估**（host.exe + GameHost.lua 要补的仅剩）：
+
+| 职责 | 依据 | 复刻难度 |
+| --- | --- | --- |
+| KCP 会话服务（CE1 握手/conv/重传/流分帧） | §10，标准 KCP + 3B 前缀 | 低（协议已明） |
+| h2c 加密 | §10 ⑤ | **高（唯一硬骨头）** |
+| 控制面服务端（上传接收/起局/日志回传 0xF00C） | scegame-reverse.md §8，客户端侧已实现 | 中（镜像实现） |
+| 地图加载编排（load_scene/init 链/obj 数编注入） | base.game.load_scene + package.loaded 结构 | 中（需逆向 GameHost.lua 行为，可经中继 0xF00C 全日志观察） |
+| 消息路由（0x7006 → base.game.message/ui → 服务端 lua 回调） | c2h 明文 + base.game.message/ui 函数点 | 中 |
+| 时钟/心跳（0xF100/0x2000/0xF01F） | §10 消息表 | 低 |
+| 服务端引擎本体（世界模拟/单位/技能/视野，base 977 键背后的 native） | 客户端引擎仅客户端构建（§3） | **不可行（仍需官方 server 引擎或完整重写，这是 C 路线的真天花板）** |
+
+结论：**自建 host 的「会话面 + 编排面」复刻可行且工作量可控（瓶颈只剩 h2c 加密）；「服务端引擎本体」不可复刻**——完整脱机（C）依旧卡在最后一条，与 §4 五条证据一致。现实路线仍是 A（中继，已交付）→ 破 h2c 加密后可谈 B（壳 host）。
+
+## 12. 遗留研究项
+
+- ~~KCP 会话协议抓包~~（§10 已完成一轮）：下一步 = h2c 加密算法/密钥派生逆向（客户端 KCPNetwork 收包路径 Hook，或 entrance_sniff 式 RVA 定位）。
+- `scegame-reverse.md` ack 时序记录与本地实测矛盾（editor-patch editor-debug-channels.md §2 已登记）：本地实测编辑器逐文件等 0xF010 ack，需抓云端高延迟场景修正。
+- 手机调试场景 host_token 是否校验（editor-debug-channels.md §4.3 登记）。

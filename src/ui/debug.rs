@@ -48,6 +48,16 @@ impl App {
                 }
             });
 
+        // host 模式：云端直连（现状）/ 本地自建 host（中继到云端，全流量 capture）
+        let host_options = ["云端 host（直连，默认）", "本地自建 host（中继，127.0.0.1:5003）"];
+        egui::ComboBox::from_label("host 模式")
+            .selected_text(host_options[self.debug_host_sel.min(1)])
+            .show_ui(ui, |ui| {
+                for (i, name) in host_options.iter().enumerate() {
+                    ui.selectable_value(&mut self.debug_host_sel, i, *name);
+                }
+            });
+
         // 参数区
         if self.debug_runtime_input.is_empty() {
             self.debug_runtime_input = std::env::current_exe()
@@ -151,6 +161,11 @@ impl App {
                         userid,
                         env_domain,
                         runtime_kind: kind,
+                        host_mode: if self.debug_host_sel == 1 {
+                            crate::core::debug::HostMode::LocalRelay
+                        } else {
+                            crate::core::debug::HostMode::Cloud
+                        },
                     };
                     let (tx, rx) = std::sync::mpsc::channel();
                     let (prog_tx, prog_rx) = std::sync::mpsc::channel::<String>();

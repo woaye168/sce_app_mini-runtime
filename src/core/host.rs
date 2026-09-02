@@ -11,7 +11,7 @@ use std::time::Duration;
 
 // ---------- protobuf wire 手写编码（官方就是手写 wire，无 descriptor） ----------
 
-fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
+pub(crate) fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
     loop {
         let b = (v & 0x7F) as u8;
         v >>= 7;
@@ -23,18 +23,18 @@ fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
     }
 }
 
-fn put_field_varint(buf: &mut Vec<u8>, field: u32, v: u64) {
+pub(crate) fn put_field_varint(buf: &mut Vec<u8>, field: u32, v: u64) {
     put_varint(buf, ((field << 3) as u64) | 0);
     put_varint(buf, v);
 }
 
-fn put_field_bytes(buf: &mut Vec<u8>, field: u32, data: &[u8]) {
+pub(crate) fn put_field_bytes(buf: &mut Vec<u8>, field: u32, data: &[u8]) {
     put_varint(buf, ((field << 3) as u64) | 2);
     put_varint(buf, data.len() as u64);
     buf.extend_from_slice(data);
 }
 
-fn get_varint(data: &[u8], pos: &mut usize) -> Result<u64> {
+pub(crate) fn get_varint(data: &[u8], pos: &mut usize) -> Result<u64> {
     let mut v: u64 = 0;
     let mut shift = 0;
     loop {
@@ -55,23 +55,23 @@ fn get_varint(data: &[u8], pos: &mut usize) -> Result<u64> {
 // ---------- 帧编解码 ----------
 
 /// 消息类型（0xF000 段，抓包实证）
-const MSG_EDITOR_LOGIN: u64 = 0xF000;
-const MSG_EDITOR_LOGIN_RESULT: u64 = 0xF001;
-const MSG_SEND_WRITE_FILE: u64 = 0xF004;
-const MSG_SEND_FILE_BLOCK: u64 = 0xF008;
-const MSG_FILE_END: u64 = 0xF00A;
-const MSG_NOTIFY_EDITOR_LOG: u64 = 0xF00C;
-const MSG_EDITOR_PING: u64 = 0xF011;
-const MSG_EDITOR_START_GAME: u64 = 0xF012;
-const MSG_EDITOR_PING_RES: u64 = 0xF017;
-const MSG_EDITOR_START_GAME_RES: u64 = 0xF018;
-const MSG_UPLOAD_PROGRESS: u64 = 0xF01A;
+pub(crate) const MSG_EDITOR_LOGIN: u64 = 0xF000;
+pub(crate) const MSG_EDITOR_LOGIN_RESULT: u64 = 0xF001;
+pub(crate) const MSG_SEND_WRITE_FILE: u64 = 0xF004;
+pub(crate) const MSG_SEND_FILE_BLOCK: u64 = 0xF008;
+pub(crate) const MSG_FILE_END: u64 = 0xF00A;
+pub(crate) const MSG_NOTIFY_EDITOR_LOG: u64 = 0xF00C;
+pub(crate) const MSG_EDITOR_PING: u64 = 0xF011;
+pub(crate) const MSG_EDITOR_START_GAME: u64 = 0xF012;
+pub(crate) const MSG_EDITOR_PING_RES: u64 = 0xF017;
+pub(crate) const MSG_EDITOR_START_GAME_RES: u64 = 0xF018;
+pub(crate) const MSG_UPLOAD_PROGRESS: u64 = 0xF01A;
 
 /// 大文件分块阈值与块长（抓包实证：85KB 的走整发，168KB 的走 101400 分块）
 const BLOCK_SIZE: usize = 101400;
 
 /// 组帧：u32 LE 总长（含自身）+ 0x00 + envelope{ f1: header{ f1 type, f2 body } }
-fn encode_frame(msg_type: u64, body: &[u8]) -> Vec<u8> {
+pub(crate) fn encode_frame(msg_type: u64, body: &[u8]) -> Vec<u8> {
     let mut header = Vec::new();
     put_field_varint(&mut header, 1, msg_type);
     put_field_bytes(&mut header, 2, body);
@@ -92,7 +92,7 @@ pub struct Frame {
     pub body: Vec<u8>,
 }
 
-fn decode_frame(data: &[u8]) -> Result<Frame> {
+pub(crate) fn decode_frame(data: &[u8]) -> Result<Frame> {
     let mut pos = 4; // 跳过 total_len
     let _flag = data[pos];
     pos += 1;
@@ -442,10 +442,16 @@ impl HostControl {
     pub fn shutdown(&self) {
         let _ = self.stream.shutdown(Shutdown::Both);
     }
+
+    /// 拆出底层 TcpStream（local_host 中继模式转 raw 双向转发用；清掉读超时转阻塞）
+    pub(crate) fn into_stream(self) -> TcpStream {
+        let _ = self.stream.set_read_timeout(None);
+        self.stream
+    }
 }
 
 /// body 里读字符串字段
-fn body_string(body: &[u8], want_field: u32) -> Option<String> {
+pub(crate) fn body_string(body: &[u8], want_field: u32) -> Option<String> {
     let mut pos = 0;
     while pos < body.len() {
         let tag = get_varint(body, &mut pos).ok()?;

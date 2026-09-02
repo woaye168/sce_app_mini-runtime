@@ -9,6 +9,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+/// 调试 host 模式：云端直连（现状默认）/ 本地自建 host（中继，core/local_host.rs）
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HostMode {
+    Cloud,
+    LocalRelay,
+}
+
 /// 调试会话参数
 pub struct DebugParams {
     /// 项目根目录（含 project.sce / project/map_settings.json）
@@ -25,6 +32,8 @@ pub struct DebugParams {
     pub env_domain: String,
     /// 运行时种类（缺省 = 编辑器-api<项目 api_version>）
     pub runtime_kind: Option<crate::core::runtimes::RuntimeKind>,
+    /// host 模式（缺省 = 云端直连）
+    pub host_mode: HostMode,
 }
 
 /// 调试会话
@@ -213,10 +222,42 @@ impl DebugSession {
             }
         };
 
-        // ① assign_host
-        log_warn("assign_host...");
-        let host = host::assign_host(&params.cred, &params.env_domain, api_version)?;
-        log_warn(&format!("host: {}:{} token={}", host.ip, host.port, host.token));
+        // ① host：云端直连 = assign_host；本地自建 = 起中继 host（线程常驻）后指 127.0.0.1
+        let host = match params.host_mode {
+            HostMode::Cloud => {
+                log_warn("assign_host...");
+                let host = host::assign_host(&params.cred, &params.env_domain, api_version)?;
+                log_warn(&format!("host: {}:{} token={}", host.ip, host.port, host.token));
+                host
+            }
+            HostMode::LocalRelay => {
+                log_warn("启动本地自建 host（中继模式）...");
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let port = crate::core::local_host::ensure_running(
+                    crate::core::local_host::LocalHostParams {
+                        port: 5003,
+                        cred: params.cred.clone(),
+                        env_domain: params.env_domain.clone(),
+                        api_version,
+                        capture_path: Some(
+                            params
+                                .runtime_dir
+                                .join("User")
+                                .join(format!("host_capture-{ts}.jsonl")),
+                        ),
+                    },
+                )?;
+                log_warn(&format!("本地 host 已就绪: 127.0.0.1:{port}"));
+                host::HostInfo {
+                    ip: "127.0.0.1".to_string(),
+                    port,
+                    token: "local".to_string(),
+                }
+            }
+        };
 
         // ①.5 凭证注入：写 runtime/User/user_info-<env>.json（客户端 account 模块启动时读取）
         let user_info_path = params

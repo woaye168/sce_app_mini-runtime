@@ -3,6 +3,7 @@ pub mod auth;
 pub mod capture;
 pub mod debug;
 pub mod host;
+pub mod local_host;
 pub mod locate;
 pub mod login;
 pub mod login_state;

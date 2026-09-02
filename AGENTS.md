@@ -24,6 +24,7 @@ src/core/login_state.rs # 登录态获取（起脱机客户端真实登录，从
 src/core/verify.rs     # 凭证校验
 src/core/runtimes.rs   # 运行时切换架子（RuntimeKind：编辑器-api/对战平台测试/正式；引擎包/spawn 目标/env 域）
 src/core/host.rs       # 调试 host 控制协议（EditorLogin/上传/起局/host 日志，手写 protobuf wire）
+src/core/local_host.rs # 自建 host（中继模式）：TCP 控制面中继 + UDP KCP NAT（会话端口=控制端口+50）+ 全流量 capture
 src/core/payload.rs    # 载荷同步：update-info + OSS 下载 + TNND/UPAK 落位 + 注册表合成 + 基座资产
 src/core/staging.rs    # 调试 staging 生成（白名单拷贝 + ui/script/main.lua 包装）
 src/core/debug.rs      # B 模式编排：assign_host → 上传 → 起局 → spawn（CreateProcessW 防管道继承）
@@ -49,6 +50,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 - **基座资产**（update-info 不分发：ui/font/regular 字体族、fonts、characters、effect）：本机编辑器兜底复制（tsconfig 推导）→ 否则下载本仓库 release 的 base_assets.7z（**仓库私有，走 GitHub API + token**：env `MINI_RUNTIME_GITHUB_TOKEN` → 凭据管理器 `bgd_sce_tools/github_token`；env `MINI_RUNTIME_BASE_ASSETS_URL` 可覆盖为公开直链）。重新打包：`examples/pack_base_assets.ps1` 后 `gh release upload <tag> --clobber`。
 - **spawn 防卡死**：游戏进程必须用裸 `CreateProcessW(bInheritHandles=FALSE)` 拉起——std Command 会让游戏继承调用方管道句柄，导致管道对端工具等 EOF 卡死到游戏关窗。
 - **B 模式永远带 `-no_update`**：否则 scegame 会自更新并清掉组装好的载荷。
+- **自建 host（中继模式，local_host.rs）**：`debug start --host cloud|local`（CLI）与调试页「host 模式」下拉（GUI）可选，默认云端直连。local = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 逆向抓包平台）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
 
 ## 工具集（examples/，全部 cargo examples）
 
@@ -58,6 +60,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 | `entrance_sniff` | Entrance 协议帧明文 dump（hook 发送函数+接收日志点，云变量 0xA000 全双向；RVA 可用环境变量覆盖） |
 | `entrance_client` | Entrance 直连客户端：绕过引擎直读直写云变量（read/seti/sets/list；协议见 doc/research/lowlevel/cloudvar-04~06） |
 | `capture_parse` | jsonl 分析：`frames`（按消息逐帧 dump）/ `dump`（时间线递归 wire 解码）/ `blocks`（大文件分块序列） |
+| `kcp_capture_parse` | 中继 KCP 抓包分析（host_capture-*.jsonl）：`stats`（握手/conv/cmd 分布）/ `flow`（PUSH 去重 + wire dump + msgpack 串扫描）。零外部依赖，缺 libclang 时可 rustc 直编 |
 | `restore_game` | 加密包一键还原：TNND → 7z → UPAK → 伪 KTX 图片转 PNG（BC1/2/3/7） |
 | `proto_extract` | 从 protobuf C++ 二进制提取内嵌 FileDescriptorProto |
 | `find_xref` / `disasm_at` | PE 字符串 RIP-xref 查找 / 线性反汇编（PE 解析手写在 examples/util） |

@@ -40,6 +40,11 @@ fn main() -> eframe::Result<()> {
                 cli_debug(&args[2..]);
                 return Ok(());
             }
+            "host" => {
+                attach_parent_console();
+                cli_host(&args[2..]);
+                return Ok(());
+            }
             "capture" => {
                 attach_parent_console();
                 cli_capture(&args[2..]);
@@ -237,6 +242,7 @@ fn cli_debug(args: &[String]) {
             let mut cred_label = None;
             let mut hold_secs = None;
             let mut kind_str: Option<String> = None;
+            let mut host_mode = core::debug::HostMode::Cloud;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -248,11 +254,19 @@ fn cli_debug(args: &[String]) {
                     "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
                     "--hold" => { hold_secs = args.get(i + 1).cloned(); i += 2; }
                     "--kind" => { kind_str = args.get(i + 1).cloned(); i += 2; }
+                    "--host" => {
+                        host_mode = match args.get(i + 1).map(|s| s.as_str()) {
+                            Some("local") => core::debug::HostMode::LocalRelay,
+                            Some("cloud") => core::debug::HostMode::Cloud,
+                            other => { eprintln!("--host 只支持 cloud|local，收到: {other:?}"); return; }
+                        };
+                        i += 2;
+                    }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }
             let Some(project) = project else {
-                eprintln!("用法: debug start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--kind editor-<api>|tester_test|tester_prod]");
+                eprintln!("用法: debug start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--kind editor-<api>|tester_test|tester_prod] [--host cloud|local]");
                 return;
             };
             let store = core::auth::CredentialStore::load();
@@ -292,15 +306,21 @@ fn cli_debug(args: &[String]) {
                 userid,
                 env_domain,
                 runtime_kind: kind_str.map(|s| core::runtimes::parse(&s, 13)),
+                host_mode,
             };
             match core::debug::DebugSession::start(&params) {
                 Ok(mut session) => {
                     println!("调试局已启动: session_id={} 客户端pid={}", session.session_id, session.pid());
-                    // --hold <秒>：保持控制连接，持续 dump host 服务端日志（诊断用）
-                    if let Some(hold) = &hold_secs {
-                        let secs: u64 = hold.parse().unwrap_or(0);
-                        println!("保持控制连接 {secs}s，收取 host 日志...");
-                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+                    // 本地自建 host 模式：中继线程活在本进程，CLI 必须常驻（隐含 --hold 永久）
+                    let hold_forever = host_mode == core::debug::HostMode::LocalRelay;
+                    if hold_forever || hold_secs.is_some() {
+                        let secs: u64 = hold_secs.as_deref().and_then(|s| s.parse().ok()).unwrap_or(0);
+                        if hold_forever {
+                            println!("本地自建 host 模式：本进程是中继载体，保持运行（Ctrl+C 停止，客户端随之中断）...");
+                        } else {
+                            println!("保持控制连接 {secs}s，收取 host 日志...");
+                        }
+                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(if hold_forever { u64::MAX / 2 } else { secs });
                         let mut shown = 0usize;
                         while std::time::Instant::now() < deadline {
                             session.poll();
@@ -358,6 +378,72 @@ fn cli_debug(args: &[String]) {
         }
         _ => {
             eprintln!("debug 子命令: start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] | stop [--staging <暂存目录> | --runtime <载荷目录> --project <路径>]");
+        }
+    }
+}
+
+/// host start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>]
+/// 前台跑自建 host（中继模式）：编辑器「调试(本地服务器)」（use_local_host → 127.0.0.1:5003）直接接入
+fn cli_host(args: &[String]) {
+    match args.first().map(|s| s.as_str()) {
+        Some("start") => {
+            let mut project = None;
+            let mut port = 5003u16;
+            let mut env_domain = "editor-pd.spark.xd.com".to_string();
+            let mut cred_label = None;
+            let mut capture = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--project" => { project = args.get(i + 1).cloned(); i += 2; }
+                    "--port" => { port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(port); i += 2; }
+                    "--env" => { env_domain = args.get(i + 1).cloned().unwrap_or(env_domain); i += 2; }
+                    "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
+                    "--capture" => { capture = args.get(i + 1).cloned(); i += 2; }
+                    other => { eprintln!("未知参数: {other}"); return; }
+                }
+            }
+            let Some(project) = project else {
+                eprintln!("用法: host start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>]");
+                return;
+            };
+            let store = core::auth::CredentialStore::load();
+            let label = cred_label.or(store.active_label.clone());
+            let Some(label) = label else {
+                eprintln!("无可用凭证（先用 auth import/login）");
+                return;
+            };
+            let Some(cred) = store.items.get(&label) else {
+                eprintln!("凭证不存在: {label}");
+                return;
+            };
+            let (_, api_version) = match core::debug::read_map_settings(std::path::Path::new(&project)) {
+                Ok(v) => v,
+                Err(e) => { eprintln!("读项目失败: {e}"); return; }
+            };
+            let capture_path = capture.map(PathBuf::from).unwrap_or_else(|| {
+                let ts = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                std::env::current_exe()
+                    .map(|e| e.with_file_name(format!("host_capture-{ts}.jsonl")))
+                    .unwrap_or_else(|_| PathBuf::from(format!("host_capture-{ts}.jsonl")))
+            });
+            println!("项目 {}（api={api_version}）凭证 {label}", project);
+            let params = core::local_host::LocalHostParams {
+                port,
+                cred: cred.info.clone(),
+                env_domain,
+                api_version,
+                capture_path: Some(capture_path),
+            };
+            if let Err(e) = core::local_host::run(params, None) {
+                eprintln!("自建 host 退出: {e}");
+            }
+        }
+        _ => {
+            eprintln!("host 子命令: start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>]");
         }
     }
 }
@@ -472,6 +558,8 @@ struct App {
     debug_start_rx: Option<std::sync::mpsc::Receiver<ui::debug::StartOutcome>>,
     /// 运行时选择（0=编辑器-api（默认） 1=对战平台测试 2=对战平台正式）
     debug_kind_sel: usize,
+    /// host 模式（0=云端直连（默认） 1=本地自建 host（中继））
+    debug_host_sel: usize,
     /// 启动前自动 payload sync 的进度
     debug_progress_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
@@ -499,6 +587,7 @@ impl Default for App {
             debug_runtime_input: String::new(),
             debug_start_rx: None,
             debug_kind_sel: 0,
+            debug_host_sel: 0,
             debug_progress_rx: None,
         }
     }

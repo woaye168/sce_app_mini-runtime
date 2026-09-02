@@ -10,6 +10,7 @@
 | [runtimes.md](runtimes.md) | **两套官方运行时**（星火编辑器 vs 星火对战平台）的结构、引擎归属、各 dll/exe 作用 | 涉及引擎二进制、载荷组装、登录/运行链路时 |
 | [offline-auth-debug.md](offline-auth-debug.md) | 脱机登录体系：凭证文件格式、TapTap device flow、HTTP 签名、服务地址推导 | 涉及凭证/登录/内部 API 调用时 |
 | [scegame-reverse.md](scegame-reverse.md) | 逆向主文档：引擎子系统、控制协议（0xF000 段）、B 模式自托管、载荷 0 依赖下载通道 | 涉及调试 host 控制协议、staging、载荷下载时 |
+| [self-host.md](self-host.md) | **自建 host 可行性**：三层组成现状、server 运行时不可得五条证据、variation=server 通道、debug_via_remote=0 实验、可选架构 A/B/C | 涉及自建/本地 host、调试后端选型时 |
 | [credential-userid.md](credential-userid.md) | **userid/user_name 的来源与获取**（凭证里没有、登录态才有、kid 是 opaque） | 涉及 userid 自动补全、凭证命名、多账号时 |
 | [payload-packages.md](payload-packages.md) | 载荷包体系：update-info 契约、包格式（7z/TNND/UPAK）、落位布局、版本注册表合成、基座资产 | 涉及 payload sync、包解包、版本跟随、字体/资源缺失时 |
 | [cloudvar-lowlevel.md](cloudvar-lowlevel.md) | **云变量底层全解**：sce.s/ScoreArchive 本质、Entrance 0xA000 协议解码、op 码/MessagePack 值编码/签名终表、权限模型、直连客户端与限流、2.0 云数据 API | 涉及云变量读写、entrance_client 直连、权限/限流问题、云数据能力调研时 |
