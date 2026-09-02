@@ -9,12 +9,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// 调试 host 模式：云端直连（现状默认）/ 本地中继 / 本地壳 host（真本地，0.5.0 R3）
+/// 调试 host 模式：云端直连（默认）/ 本地中继（观测抓包）/ 真本地（脱机 lua 服务端，0.5.0 R3+R4）
+/// 0.5.0 语义切换：CLI/GUI 的 local 从「中继」改为「真本地」，中继由 relay 承接（Release notes 已标注）
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HostMode {
     Cloud,
-    LocalRelay,
-    LocalShell,
+    Relay,
+    Local,
 }
 
 /// 调试会话参数
@@ -35,11 +36,15 @@ pub struct DebugParams {
     pub runtime_kind: Option<crate::core::runtimes::RuntimeKind>,
     /// host 模式（缺省 = 云端直连）
     pub host_mode: HostMode,
+    /// 附加客户端（多开）：每个 = (凭证, userid)，在主客户端之后串行拉起（凭证注入互斥需间隔）
+    pub extra_clients: Vec<(UserInfo, i64)>,
 }
 
 /// 调试会话
 pub struct DebugSession {
     pid: u32,
+    /// 附加客户端 pid（多开）
+    extra_pids: Vec<u32>,
     pub started: Instant,
     pub runtime_dir: PathBuf,
     pub session_id: u64,
@@ -203,6 +208,38 @@ pub fn spawn_detached_pub(exe: &Path, args: &[String], cwd: &Path) -> Result<u32
     spawn_detached(exe, args, cwd)
 }
 
+/// 客户端命令行参数（B 模式契约；多开与「本地服务器」标签页复用）
+#[allow(clippy::too_many_arguments)]
+pub fn build_client_args(
+    host_ip: &str,
+    host_port: u16,
+    userid: i64,
+    staging_dir: &Path,
+    dir_name: &str,
+    api_version: u32,
+    env_domain: &str,
+) -> Vec<String> {
+    vec![
+        "-env=game".to_string(),
+        "-editor_server_debug".to_string(),
+        format!("-editor_api_version={api_version}"),
+        "-no_update".to_string(),
+        "-save_replay".to_string(),
+        "-kcp_stream".to_string(),
+        "-map_kind=0".to_string(),
+        format!("-server={env_domain}"),
+        "-use_local_res".to_string(),
+        format!("-host_ip={host_ip}"),
+        format!("-host_port={host_port}"),
+        "-local_test".to_string(),
+        format!("-user={userid}"),
+        format!("-map_path={}", staging_dir.display()),
+        format!("-to_download_list={dir_name}"),
+        "-width=1600".to_string(),
+        "-height=900".to_string(),
+    ]
+}
+
 impl DebugSession {
     /// 完整 B 模式启动：assign_host → 控制连接上传 → EditorStartGame → spawn 客户端
     pub fn start(params: &DebugParams) -> Result<Self> {
@@ -231,7 +268,7 @@ impl DebugSession {
                 log_warn(&format!("host: {}:{} token={}", host.ip, host.port, host.token));
                 host
             }
-            HostMode::LocalRelay => {
+            HostMode::Relay => {
                 log_warn("启动本地自建 host（中继模式）...");
                 let ts = std::time::SystemTime::now()
                     .duration_since(std::time::UNIX_EPOCH)
@@ -258,7 +295,7 @@ impl DebugSession {
                     token: "local".to_string(),
                 }
             }
-            HostMode::LocalShell => {
+            HostMode::Local => {
                 log_warn("启动本地壳 host（真本地，无云端）...");
                 let port = crate::core::game_host::ensure_running(crate::core::game_host::GameHostParams {
                     port: 5003,
@@ -317,34 +354,50 @@ impl DebugSession {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| project_name.clone());
-        let client_args = vec![
-            "-env=game".to_string(),
-            "-editor_server_debug".to_string(),
-            format!("-editor_api_version={api_version}"),
-            "-no_update".to_string(),
-            "-save_replay".to_string(),
-            "-kcp_stream".to_string(),
-            "-map_kind=0".to_string(),
-            format!("-server={}", params.env_domain),
-            "-use_local_res".to_string(),
-            format!("-host_ip={}", host.ip),
-            format!("-host_port={}", host.port),
-            "-local_test".to_string(),
-            format!("-user={}", params.userid),
-            format!("-map_path={}", staging_dir.display()),
-            format!("-to_download_list={dir_name}"),
-            "-width=1600".to_string(),
-            "-height=900".to_string(),
-        ];
+        let client_args = build_client_args(
+            &host.ip,
+            host.port,
+            params.userid,
+            &staging_dir,
+            &dir_name,
+            api_version,
+            &params.env_domain,
+        );
         let child_pid = spawn_detached(&exe, &client_args, &params.runtime_dir)?;
         log_warn(&format!("客户端已拉起 pid={child_pid}（引擎 {}）", kind.display_name()));
 
-        // pidfile：<staging>.pid（debug stop 用）
+        // ④.5 附加客户端（多开）：凭证注入是单文件互斥（user_info-<env>.json），
+        // 串行「写凭证 → 拉起 → 等其读取」逐个来；间隔 6s 实测够客户端启动期读完
+        let mut extra_pids = Vec::new();
+        for (cred2, userid2) in &params.extra_clients {
+            crate::core::auth::write_user_info(&user_info_path, cred2)?;
+            let mut args2 = client_args.clone();
+            for a in args2.iter_mut() {
+                if a.starts_with("-user=") {
+                    *a = format!("-user={userid2}");
+                }
+            }
+            let pid2 = spawn_detached(&exe, &args2, &params.runtime_dir)?;
+            log_warn(&format!("附加客户端已拉起 pid={pid2}（userid={userid2}）"));
+            extra_pids.push(pid2);
+            std::thread::sleep(Duration::from_secs(6));
+        }
+        // 恢复主凭证注入（后续重连/下局仍用主号）
+        if !params.extra_clients.is_empty() {
+            crate::core::auth::write_user_info(&user_info_path, &params.cred)?;
+        }
+
+        // pidfile：<staging>.pid（debug stop 用；多开 = 每行一个 pid）
         let pid_file = staging_dir.with_extension("pid");
-        let _ = std::fs::write(&pid_file, child_pid.to_string());
+        let mut pids_text = child_pid.to_string();
+        for p in &extra_pids {
+            pids_text.push_str(&format!("\n{p}"));
+        }
+        let _ = std::fs::write(&pid_file, pids_text);
 
         Ok(Self {
             pid: child_pid,
+            extra_pids,
             started: Instant::now(),
             runtime_dir: params.runtime_dir.clone(),
             session_id,
@@ -355,13 +408,19 @@ impl DebugSession {
     /// 按 pidfile 停止（CLI debug stop：宿主已退出时用）
     pub fn stop_by_pidfile(staging_dir: &Path) -> Result<()> {
         let pid_file = staging_dir.with_extension("pid");
-        let pid = std::fs::read_to_string(&pid_file)
+        let text = std::fs::read_to_string(&pid_file)
             .map_err(|e| anyhow!("读 pidfile 失败 {}: {e}", pid_file.display()))?;
-        let _ = crate::core::silent_command("taskkill")
-            .args(["/PID", pid.trim(), "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        for line in text.lines() {
+            let pid = line.trim();
+            if pid.is_empty() {
+                continue;
+            }
+            let _ = crate::core::silent_command("taskkill")
+                .args(["/PID", pid, "/T", "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
         let _ = std::fs::remove_file(&pid_file);
         Ok(())
     }
@@ -381,14 +440,17 @@ impl DebugSession {
         }
     }
 
-    /// 停止：杀客户端进程树 + 断控制连接
+    /// 停止：杀客户端进程树（含多开附加客户端）+ 断控制连接
     pub fn stop(&mut self) {
-        let pid = self.pid.to_string();
-        let _ = crate::core::silent_command("taskkill")
-            .args(["/PID", &pid, "/T", "/F"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        let mut pids: Vec<String> = vec![self.pid.to_string()];
+        pids.extend(self.extra_pids.iter().map(|p| p.to_string()));
+        for pid in pids {
+            let _ = crate::core::silent_command("taskkill")
+                .args(["/PID", &pid, "/T", "/F"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+        }
         if let Some(ctl) = &self.ctl {
             ctl.shutdown();
         }

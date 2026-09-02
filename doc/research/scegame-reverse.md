@@ -512,6 +512,8 @@ h→c 0x103(25B)；c→h 0x7300（空）→ c→h 0x6011；h→c 0x7008 ticket_i
 
 **对 R3 的硬性结论**：① 客户端 0x6011 与 msg 5 收到即弃（host 不处理不断连）；② 登录必须应答 type 2 + 0x15（否则客户端卡在登录）；③ 0x31007 tick 必须持续下发（客户端逻辑帧由它驱动，200ms 周期）；④ 玩法请求 0x7006 的应答走 0x7008（f3 type_id 可按到达顺序递增分配，f4 首次携带名字）。
 
+**R4/R5 补充实证**：⑤ 0x7006 内建通道 `__client_key_down/up`（{player_id, key}，script-199 game.lua:517-525）不走 base.ui.proto，host 原生转 玩家-按键按下/松开 事件；`move_to_direction`/`stop_move_to_direction`/`__client_mouse_*` 同为内建通道（官方由 host 原生世界模拟消化，B+ 路线弃）。⑥ type 2 登录应答的本人 userid（varint）出现 2 处、0x102 各含 1 处——多账号局必须按实际登录 userid 原位补丁（varint 等长约束：本地账号 userid 分配在 4 字节 varint 区间 90000001 起）。⑦ 广播（base.game:ui）在零就绪会话期产生需挂起补发（官方语义 = 后进玩家拿世界状态）。
+
 ### 13.10 分析工具与 oracle 手法
 
 | 工具/手法 | 用途 |

@@ -55,6 +55,11 @@ fn main() -> eframe::Result<()> {
                 cli_payload(&args[2..]);
                 return Ok(());
             }
+            "local" => {
+                attach_parent_console();
+                cli_local(&args[2..]);
+                return Ok(());
+            }
             _ => {}
         }
     }
@@ -230,6 +235,96 @@ fn cli_auth(args: &[String]) {
     }
 }
 
+/// 本地服务器 CLI（0.5.0 R5）：local account list/create/remove + local play（按本地账号拉起客户端，多开多账号）
+fn cli_local(args: &[String]) {
+    match args.first().map(|s| s.as_str()) {
+        Some("account") => match args.get(1).map(|s| s.as_str()) {
+            Some("list") => {
+                for acc in core::local_accounts::list().unwrap_or_default() {
+                    println!("{}  userid={}  {}", acc.name, acc.userid, acc.created_at);
+                }
+            }
+            Some("create") => {
+                let Some(name) = args.get(2) else { eprintln!("用法: local account create <名字>"); return; };
+                match core::local_accounts::create(name) {
+                    Ok(acc) => println!("已创建: {} userid={}", acc.name, acc.userid),
+                    Err(e) => eprintln!("创建失败: {e}"),
+                }
+            }
+            Some("remove") => {
+                let Some(name) = args.get(2) else { eprintln!("用法: local account remove <名字>"); return; };
+                let found = core::local_accounts::list().unwrap_or_default().into_iter().find(|a| &a.name == name);
+                match found {
+                    Some(acc) => match core::local_accounts::remove(acc.id) {
+                        Ok(()) => println!("已删除: {name}"),
+                        Err(e) => eprintln!("删除失败: {e}"),
+                    },
+                    None => eprintln!("账号不存在: {name}"),
+                }
+            }
+            _ => eprintln!("用法: local account list|create <名字>|remove <名字>"),
+        },
+        Some("play") => {
+            // local play --project <路径> --account <名字> [--account <名字2> ...] [--runtime <载荷目录>]
+            let mut project = None;
+            let mut runtime = None;
+            let mut names: Vec<String> = Vec::new();
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--project" => { project = args.get(i + 1).cloned(); i += 2; }
+                    "--runtime" => { runtime = args.get(i + 1).cloned(); i += 2; }
+                    "--account" => { names.push(args.get(i + 1).cloned().unwrap_or_default()); i += 2; }
+                    other => { eprintln!("未知参数: {other}"); return; }
+                }
+            }
+            let Some(project) = project else {
+                eprintln!("用法: local play --project <路径> --account <名字> [--account <名字2> ...] [--runtime <载荷目录>]");
+                return;
+            };
+            if names.is_empty() {
+                eprintln!("至少一个 --account");
+                return;
+            }
+            let accounts = core::local_accounts::list().unwrap_or_default();
+            let runtime_dir = runtime.map(PathBuf::from).unwrap_or_else(|| {
+                std::env::current_exe().map(|e| e.with_file_name("runtime")).unwrap_or_else(|_| PathBuf::from("runtime"))
+            });
+            for (idx, name) in names.iter().enumerate() {
+                let Some(acc) = accounts.iter().find(|a| &a.name == name) else {
+                    eprintln!("账号不存在: {name}（先 local account create）");
+                    continue;
+                };
+                match core::local_play::launch(
+                    &core::local_play::LocalPlayParams {
+                        project_root: PathBuf::from(&project),
+                        runtime_dir: runtime_dir.clone(),
+                        env_domain: "editor-pd.spark.xd.com".into(),
+                        account: acc.clone(),
+                    },
+                    &mut |msg| println!("[play] {msg}"),
+                ) {
+                    Ok(pid) => println!("账号 {name} 客户端 pid={pid}"),
+                    Err(e) => {
+                        eprintln!("账号 {name} 启动失败: {e}");
+                        return;
+                    }
+                }
+                // 凭证注入互斥（user_info 单文件）：下一个账号等 6s 让上一个读完
+                if idx + 1 < names.len() {
+                    std::thread::sleep(std::time::Duration::from_secs(6));
+                }
+            }
+            // host 线程活在本进程：常驻承载
+            println!("本地 host 常驻中（Ctrl+C 停止，客户端随之中断）...");
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+            }
+        }
+        _ => eprintln!("用法: local account list|create|remove / local play --project <路径> --account <名字>..."),
+    }
+}
+
 fn cli_debug(args: &[String]) {
     match args.first().map(|s| s.as_str()) {
         Some("start") => {
@@ -243,6 +338,7 @@ fn cli_debug(args: &[String]) {
             let mut hold_secs = None;
             let mut kind_str: Option<String> = None;
             let mut host_mode = core::debug::HostMode::Cloud;
+            let mut extra_clients_n: usize = 0;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -254,12 +350,22 @@ fn cli_debug(args: &[String]) {
                     "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
                     "--hold" => { hold_secs = args.get(i + 1).cloned(); i += 2; }
                     "--kind" => { kind_str = args.get(i + 1).cloned(); i += 2; }
+                    "--clients" => {
+                        extra_clients_n = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(0);
+                        i += 2;
+                    }
                     "--host" => {
+                        // 0.5.0 语义切换：local = 真本地（旧 0.4.x 的 local=中继改由 relay 承接）；
+                        // shell 为 0.5.0 开发期内部值，映射 local 并提示
                         host_mode = match args.get(i + 1).map(|s| s.as_str()) {
-                            Some("local") => core::debug::HostMode::LocalRelay,
                             Some("cloud") => core::debug::HostMode::Cloud,
-                            Some("shell") => core::debug::HostMode::LocalShell,
-                            other => { eprintln!("--host 只支持 cloud|local|shell，收到: {other:?}"); return; }
+                            Some("relay") => core::debug::HostMode::Relay,
+                            Some("local") => core::debug::HostMode::Local,
+                            Some("shell") => {
+                                eprintln!("[warn] --host shell 已更名 local（0.5.0 正式三态 cloud|relay|local）");
+                                core::debug::HostMode::Local
+                            }
+                            other => { eprintln!("--host 只支持 cloud|relay|local，收到: {other:?}"); return; }
                         };
                         i += 2;
                     }
@@ -267,7 +373,7 @@ fn cli_debug(args: &[String]) {
                 }
             }
             let Some(project) = project else {
-                eprintln!("用法: debug start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--kind editor-<api>|tester_test|tester_prod] [--host cloud|local]");
+                eprintln!("用法: debug start --project <路径> [--user <userid>] [--staging <暂存目录>] [--runtime <载荷目录>] [--env <域>] [--cred <凭证名>] [--clients N] [--kind editor-<api>|tester_test|tester_prod] [--host cloud|relay|local]");
                 return;
             };
             let store = core::auth::CredentialStore::load();
@@ -299,6 +405,26 @@ fn cli_debug(args: &[String]) {
                     .map(|e| e.with_file_name("runtime"))
                     .unwrap_or_else(|_| PathBuf::from("runtime"))
             });
+            // 附加客户端：按凭证库顺序取（排除主凭证），须有登录态 userid
+            let mut extra_clients: Vec<(core::auth::UserInfo, i64)> = Vec::new();
+            if extra_clients_n > 0 {
+                for (l, c) in &store.items {
+                    if *l == label {
+                        continue;
+                    }
+                    let Some(uid2) = c.info.userid else {
+                        eprintln!("[warn] 凭证 {l} 无登录态，跳过（auth refresh {l} 后可用于多开）");
+                        continue;
+                    };
+                    extra_clients.push((c.info.clone(), uid2));
+                    if extra_clients.len() >= extra_clients_n {
+                        break;
+                    }
+                }
+                if extra_clients.len() < extra_clients_n {
+                    eprintln!("[warn] 可用附加凭证不足：要 {extra_clients_n} 个，实际 {} 个", extra_clients.len());
+                }
+            }
             let params = core::debug::DebugParams {
                 project_root: PathBuf::from(&project),
                 runtime_dir,
@@ -308,13 +434,14 @@ fn cli_debug(args: &[String]) {
                 env_domain,
                 runtime_kind: kind_str.map(|s| core::runtimes::parse(&s, 13)),
                 host_mode,
+                extra_clients,
             };
             match core::debug::DebugSession::start(&params) {
                 Ok(mut session) => {
                     println!("调试局已启动: session_id={} 客户端pid={}", session.session_id, session.pid());
                     // 本地自建 host 模式：host 线程活在本进程，CLI 必须常驻（隐含 --hold 永久）
-                    let hold_forever = host_mode == core::debug::HostMode::LocalRelay
-                        || host_mode == core::debug::HostMode::LocalShell;
+                    let hold_forever = host_mode == core::debug::HostMode::Relay
+                        || host_mode == core::debug::HostMode::Local;
                     if hold_forever || hold_secs.is_some() {
                         let secs: u64 = hold_secs.as_deref().and_then(|s| s.parse().ok()).unwrap_or(0);
                         if hold_forever {
@@ -576,8 +703,16 @@ struct App {
     debug_start_rx: Option<std::sync::mpsc::Receiver<ui::debug::StartOutcome>>,
     /// 运行时选择（0=编辑器-api（默认） 1=对战平台测试 2=对战平台正式）
     debug_kind_sel: usize,
-    /// host 模式（0=云端直连（默认） 1=本地自建 host（中继））
+    /// host 模式（0=云端直连（默认） 1=本地中继 2=真本地）
     debug_host_sel: usize,
+    /// 附加客户端多开数量（0-3，按凭证库顺序取）
+    debug_extra_clients_sel: usize,
+    /// 本地服务器标签页：账号列表 / 重载标记 / 新建名 / 已拉起客户端（账号id→pid）/ 启动结果通道
+    ls_accounts: Vec<crate::core::local_accounts::LocalAccount>,
+    ls_need_reload: bool,
+    ls_new_name: String,
+    ls_clients: ui::local_server::ClientMap,
+    ls_launch_rx: Option<std::sync::mpsc::Receiver<Result<(i64, u32), String>>>,
     /// 启动前自动 payload sync 的进度
     debug_progress_rx: Option<std::sync::mpsc::Receiver<String>>,
 }
@@ -606,6 +741,12 @@ impl Default for App {
             debug_start_rx: None,
             debug_kind_sel: 0,
             debug_host_sel: 0,
+            debug_extra_clients_sel: 0,
+            ls_accounts: Vec::new(),
+            ls_need_reload: true,
+            ls_new_name: String::new(),
+            ls_clients: Default::default(),
+            ls_launch_rx: None,
             debug_progress_rx: None,
         }
     }
@@ -628,6 +769,7 @@ impl App {
 const TABS: &[bgd_appsdk::ui::ShellTab] = &[
     bgd_appsdk::ui::ShellTab { id: "auth", label: "凭证" },
     bgd_appsdk::ui::ShellTab { id: "debug", label: "调试" },
+    bgd_appsdk::ui::ShellTab { id: "local_server", label: "本地服务器" },
     bgd_appsdk::ui::ShellTab { id: "settings", label: "设置" },
 ];
 
@@ -644,6 +786,7 @@ impl bgd_appsdk::ui::ShellApp for App {
         match tab {
             "auth" => self.ui_auth(ui),
             "debug" => self.ui_debug(ui),
+            "local_server" => self.ui_local_server(ui),
             "settings" => self.ui_settings(ui),
             _ => {}
         }

@@ -48,13 +48,28 @@ impl App {
                 }
             });
 
-        // host 模式：云端直连（现状）/ 本地自建 host（中继到云端，全流量 capture）
-        let host_options = ["云端 host（直连，默认）", "本地自建 host（中继，127.0.0.1:5003）"];
+        // host 模式三态（0.5.0）：云端直连（默认）/ 本地中继（观测抓包）/ 真本地（脱机 lua 服务端）
+        // 注意：0.4.x 的「本地」是中继，0.5.0 起 local=真本地、中继由 relay 承接（语义切换）
+        let host_options = [
+            "云端 host（直连，默认）",
+            "本地中继 host（观测抓包，127.0.0.1:5003 → 云端）",
+            "真本地 host（完全脱机，内嵌 lua 服务端）",
+        ];
         egui::ComboBox::from_label("host 模式")
-            .selected_text(host_options[self.debug_host_sel.min(1)])
+            .selected_text(host_options[self.debug_host_sel.min(2)])
             .show_ui(ui, |ui| {
                 for (i, name) in host_options.iter().enumerate() {
                     ui.selectable_value(&mut self.debug_host_sel, i, *name);
+                }
+            });
+
+        // 附加客户端多开（0.5.0）：按凭证库顺序取（排除当前凭证），每个须有登录态
+        let extra_options = ["不加（单客户端）", "+1（双人）", "+2（三人）", "+3（四人）"];
+        egui::ComboBox::from_label("附加客户端")
+            .selected_text(extra_options[self.debug_extra_clients_sel.min(3)])
+            .show_ui(ui, |ui| {
+                for (i, name) in extra_options.iter().enumerate() {
+                    ui.selectable_value(&mut self.debug_extra_clients_sel, i, *name);
                 }
             });
 
@@ -132,8 +147,13 @@ impl App {
                         self.status = format!("凭证不存在: {label}");
                         return;
                     };
-                    // 前置校验：缺 HTTP 签名对时 assign_host 必失败，提前给明确引导
-                    if !cred.info.can_sign() {
+                    let host_mode = match self.debug_host_sel {
+                        1 => crate::core::debug::HostMode::Relay,
+                        2 => crate::core::debug::HostMode::Local,
+                        _ => crate::core::debug::HostMode::Cloud,
+                    };
+                    // 前置校验：缺 HTTP 签名对时 assign_host 必失败，提前给明确引导（真本地不联云端，免检）
+                    if host_mode != crate::core::debug::HostMode::Local && !cred.info.can_sign() {
                         self.status = "凭证缺 login_token/secret——请到「凭证」页重新「导入编辑器凭证」覆盖，或点击换一个凭证".into();
                         return;
                     }
@@ -161,10 +181,22 @@ impl App {
                         userid,
                         env_domain,
                         runtime_kind: kind,
-                        host_mode: if self.debug_host_sel == 1 {
-                            crate::core::debug::HostMode::LocalRelay
-                        } else {
-                            crate::core::debug::HostMode::Cloud
+                        host_mode,
+                        extra_clients: {
+                            // 多开：按凭证库顺序取（排除当前凭证），须有登录态 userid
+                            let mut v = Vec::new();
+                            for (l, c) in &self.cred_store.items {
+                                if v.len() >= self.debug_extra_clients_sel {
+                                    break;
+                                }
+                                if *l == label {
+                                    continue;
+                                }
+                                if let Some(uid2) = c.info.userid {
+                                    v.push((c.info.clone(), uid2));
+                                }
+                            }
+                            v
                         },
                     };
                     let (tx, rx) = std::sync::mpsc::channel();

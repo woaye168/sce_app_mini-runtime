@@ -1,0 +1,105 @@
+//! 本地服务器游玩编排（0.5.0 R5「本地服务器」标签页）：
+//! 按本地账号拉起客户端连真本地 host（127.0.0.1:5003）。
+//! 局未起时自动走控制面（上传 + EditorStartGame）；控制连接全局持有（断开即失去 0xF00C 日志通道）。
+
+use crate::core::local_accounts::LocalAccount;
+use anyhow::Result;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+pub struct LocalPlayParams {
+    pub project_root: PathBuf,
+    pub runtime_dir: PathBuf,
+    pub env_domain: String,
+    pub account: LocalAccount,
+}
+
+/// 局控制连接（全局持有；上传/起局各一次）
+static GAME_CTL: Mutex<Option<crate::core::host::HostControl>> = Mutex::new(None);
+
+/// 局是否已起（控制面状态）
+pub fn game_active() -> Option<String> {
+    let state = crate::core::game_host::control_state()?;
+    let g = state.lock().unwrap();
+    g.game.as_ref().map(|i| format!("{}（session={}）", i.project, i.session_id))
+}
+
+/// 停局（清控制连接 + 通知 host teardown）
+pub fn stop_game() {
+    let ctl = GAME_CTL.lock().unwrap().take();
+    if let Some(ctl) = ctl {
+        ctl.shutdown();
+    }
+    // 通知 host 停局（0xF01B 等价物走控制连接 shutdown；host 侧连接断开即释放）
+}
+
+/// 按账号拉起客户端：ensure host → 局未起则上传起局 → 合成凭证注入 → spawn。返回 pid。
+pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u32> {
+    let (project_name, api_version) = crate::core::debug::read_map_settings(&params.project_root)?;
+    // ① host 幂等
+    let port = crate::core::game_host::ensure_running(crate::core::game_host::GameHostParams {
+        port: 5003,
+        runtime_dir: params.runtime_dir.clone(),
+        env_domain: params.env_domain.clone(),
+    })?;
+    log(format!("本地 host 已就绪: 127.0.0.1:{port}"));
+
+    // staging 一次生成（上传与 -map_path 共用）
+    let staging_dir = crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
+
+    // ② 局：未起则控制面上传 + 起局
+    if game_active().is_none() {
+        log("局未起，控制连接上传项目...".into());
+        let mut ctl = crate::core::host::HostControl::connect(
+            &crate::core::host::HostInfo {
+                ip: "127.0.0.1".into(),
+                port,
+                token: "local".into(),
+            },
+            params.account.userid,
+        )?;
+        let count = ctl.upload_project(&staging_dir, &project_name)?;
+        log(format!("上传完成（{count} 个文件），EditorStartGame..."));
+        let libs = crate::core::debug::resolve_libs(
+            &params.project_root,
+            &params.runtime_dir,
+            &params.env_domain,
+        )
+        .unwrap_or_default();
+        ctl.start_game(&project_name, api_version, &libs)?;
+        let session_id = ctl.wait_start_game_res(std::time::Duration::from_secs(120))?;
+        log(format!("局已起: session_id={session_id}"));
+        *GAME_CTL.lock().unwrap() = Some(ctl);
+    }
+
+    // ③ 合成凭证注入（单文件互斥：调用方负责间隔）
+    let user_info_path = params
+        .runtime_dir
+        .join("User")
+        .join(format!("user_info-{}.json", params.env_domain));
+    crate::core::auth::write_user_info(&user_info_path, &crate::core::local_accounts::synth_user_info(&params.account))?;
+
+    // ④ spawn 客户端
+    let kind = crate::core::runtimes::RuntimeKind::EditorApi(api_version);
+    let exe = kind.client_exe(&params.runtime_dir);
+    let dir_name = params
+        .project_root
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| project_name.clone());
+    let args = crate::core::debug::build_client_args(
+        "127.0.0.1",
+        port,
+        params.account.userid,
+        &staging_dir,
+        &dir_name,
+        api_version,
+        &params.env_domain,
+    );
+    let pid = crate::core::debug::spawn_detached_pub(&exe, &args, &params.runtime_dir)?;
+    log(format!(
+        "客户端已拉起 pid={pid}（账号 {} / userid={}）",
+        params.account.name, params.account.userid
+    ));
+    Ok(pid)
+}

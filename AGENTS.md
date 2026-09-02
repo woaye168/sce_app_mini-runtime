@@ -25,6 +25,8 @@ src/core/verify.rs     # 凭证校验
 src/core/runtimes.rs   # 运行时切换架子（RuntimeKind：编辑器-api/对战平台测试/正式；引擎包/spawn 目标/env 域）
 src/core/host.rs       # 调试 host 控制协议（EditorLogin/上传/起局/host 日志，手写 protobuf wire）
 src/core/local_host.rs # 自建 host（中继模式）：TCP 控制面中继 + UDP KCP NAT（会话端口=控制端口+50）+ 全流量 capture
+src/core/local_accounts.rs # 本地服务器账号库（SQLite exe 旁 local_accounts.db；userid 90000001 起自增；合成凭证直通）
+src/core/local_play.rs   # 本地游玩编排（ensure host → 局未起自动上传起局 → 合成凭证注入 → spawn 客户端）
 src/core/kcp_server.rs  # KCP 会话面服务端（CE1 握手 + KCP 服务端 + 3B 流分帧，单会话，§13.1-13.3）
 src/core/host_server.rs # 自研 host 控制面 TCP 服务端（0xF000 段：登录/逐文件 0xF010 ack/起局/0xF00C 日志/0xF01B teardown）
 src/core/game_host.rs   # 真本地 host 编排（R3 壳：登录应答+初始化消息群+tick/时钟/探测应答；R4：lua 编排脑接线——起局建脑/0x7006 路由/0x7008 出站/帧泵/广播挂起补发）
@@ -37,7 +39,7 @@ src/core/staging.rs    # 调试 staging 生成（白名单拷贝 + ui/script/mai
 src/core/debug.rs      # B 模式编排：assign_host → 上传 → 起局 → spawn（CreateProcessW 防管道继承）
 src/core/capture.rs    # 游戏窗口截屏（WGC，自验用）
 src/core/locate.rs     # 官方目录推导（项目 tsconfig typeRoots 链）
-src/ui/{auth,debug,settings}.rs  # 标签页（impl App 分散定义）
+src/ui/{auth,debug,local_server,settings}.rs  # 标签页（impl App 分散定义；local_server = 本地服务器：账号创建/启动/停止）
 examples/              # 研究/维护工具（全部 Rust + 两个 ps1；见下方「工具集」）
 test/temp/             # 原始 dump / 一次性独立小 crate（引用文档须注明路径，期末清理无引用价值的堆积）
 doc/requirements/      # 版本需求文档
@@ -58,8 +60,9 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 - **基座资产**（update-info 不分发：ui/font/regular 字体族、fonts、characters、effect）：本机编辑器兜底复制（tsconfig 推导）→ 否则下载本仓库 release 的 base_assets.7z（**仓库私有，走 GitHub API + token**：env `MINI_RUNTIME_GITHUB_TOKEN` → 凭据管理器 `bgd_sce_tools/github_token`；env `MINI_RUNTIME_BASE_ASSETS_URL` 可覆盖为公开直链）。重新打包：`examples/pack_base_assets.ps1` 后 `gh release upload <tag> --clobber`。
 - **spawn 防卡死**：游戏进程必须用裸 `CreateProcessW(bInheritHandles=FALSE)` 拉起——std Command 会让游戏继承调用方管道句柄，导致管道对端工具等 EOF 卡死到游戏关窗。
 - **B 模式永远带 `-no_update`**：否则 scegame 会自更新并清掉组装好的载荷。
-- **自建 host（中继模式，local_host.rs）**：`debug start --host cloud|local`（CLI）与调试页「host 模式」下拉（GUI）可选，默认云端直连。local = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 会话抓包平台：c2h 明文 protobuf/cmsg_pack 可直读，h2c=ZCompress 压缩无加密，见 doc/research/scegame-reverse.md §13）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
-- **真本地 host（0.5.0 R3+R4，game_host.rs + lua_host.rs）**：`debug start --host shell` / `host start --shell`（PIE 同口）。R3 壳 = 登录/初始化消息群模板 + tick/时钟/探测应答；R4 = mlua lua54 内嵌 VM 跑项目服务端 lua（决策：内嵌 + 磁盘现读零内嵌），0x7006→`base.ui.proto[type]` 路由、`game:ui`/`player:ui`→0x7008 出站、事件泵（游戏-帧 50ms/玩家-连入/断线/按键内建通道 __client_key_down/up）、广播无就绪会话挂起补发。shim 面/踩坑全集 = self-host.md §9.6（**base.clock() 是毫秒**；mlua `Vec<Value>` 传参吞前导 nil 必须 `Variadic::from_iter`；引擎 lua 放行 ≥0x80 标识符需 sanitize_lua 清洗）。
+- **自建 host（中继模式，local_host.rs）**：中继经 `debug start --host relay`（CLI）与调试页「host 模式」下拉（GUI）选；**0.5.0 语义切换：`local` 从「中继」改为「真本地」，中继由 `relay` 承接**（旧习惯写 local 跑中继的用户注意）。relay = 127.0.0.1:5003 中继（编辑器「调试(本地服务器)」同口接入）：TCP 控制面 EditorLogin 拦截换真 token 后帧级透传到 assign_host 云端；UDP KCP NAT 转发。**KCP 会话端口 = 控制端口 + 50（引擎硬编码，5003→5053 / 20770→20820）**，UDP 必须双端口监听，否则客户端 KCP 建连失败、lua VM 不起。全流量落 `<runtime>/User/host_capture-*.jsonl`（KCP 会话抓包平台：c2h 明文 protobuf/cmsg_pack 可直读，h2c=ZCompress 压缩无加密，见 doc/research/scegame-reverse.md §13）。assign/云连接失败必须回 0xF001 result≠0（防编辑器 update_host co.call 悬挂）。详见 doc/research/self-host.md。
+- **真本地 host（0.5.0 R3+R4，game_host.rs + lua_host.rs）**：`debug start --host local` / `local play`（本地账号）/ 编辑器 PIE 同口。R3 壳 = 登录/初始化消息群模板 + tick/时钟/探测应答；R4 = mlua lua54 内嵌 VM 跑项目服务端 lua（决策：内嵌 + 磁盘现读零内嵌），0x7006→`base.ui.proto[type]` 路由、`game:ui`/`player:ui`→0x7008 出站、事件泵（游戏-帧 50ms/玩家-连入/断线/按键内建通道 __client_key_down/up）、广播无就绪会话挂起补发、登录应答模板按实际 userid 原位补丁（多账号）。shim 面/踩坑全集 = self-host.md §9.6（**base.clock() 是毫秒**；mlua `Vec<Value>` 传参吞前导 nil 必须 `Variadic::from_iter`；引擎 lua 放行 ≥0x80 标识符需 sanitize_lua 清洗；cmsg_pack 数组判定 = 键恰好 1..=n）。
+- **本地服务器标签页 + 本地账号（0.5.0 R5）**：SQLite 账号库创建/删除；每账号「启动」= 合成凭证（login=1 + token=local-<userid> + token_type=11，零网络零真实凭证）拉起独立客户端连真本地 host；多开 = 多账号各点一次（凭证注入单文件互斥，串行间隔 6s）。CLI：`local account list|create|remove`、`local play --project <路径> --account <名字>...`（常驻承载 host）。
 
 ## 工具集（examples/，全部 cargo examples）
 

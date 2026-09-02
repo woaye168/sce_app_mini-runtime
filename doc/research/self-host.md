@@ -129,6 +129,14 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 
 **验收实录（2026-09-02，test_res002 全脱机进局人工游玩）**：lua 加载链完整（bgd 四端初始化 + BagSystem/ShopSystem/GMSystem/GameServer/草丛连通区域 63）→ 玩家上线（OnPlayerJoin 全量执行）→ 移动校验（Req_PlayerMove 到达、越距拒绝+回拉）、攻击、技能（黑幕/解药恢复 102）、背包（拆分/获得/锻造/交换）、商店（GM 发放 money/gem → 各标签购买成功：free/money/gem 三货币 + 日/周/月限购 + 限量买完按钮变「已售罄」人工确认）、组队（创建队伍）、F1 触发器（`Srv_Verify_Key F1 ok` × N）、刷怪（BOSS 按点刷新 + 技能书刷取/超时循环 + 帧驱动回血 hp 95→200）→ 客户端截图渲染确认。**零 assign、零云端外联**。多人未验（待多客户端支持）。
 
+## 9.7 ★ 三态 host 与本地账号多人（0.5.0 R5 交付）
+
+- **host 模式三态**：`cloud`（云端直连，默认）/ `relay`（本地中继观测抓包）/ `local`（真本地脱机 lua 服务端）。**语义切换：0.4.x 的 `local` = 中继，0.5.0 起 `local` = 真本地**，中继由 `relay` 承接（CLI `--host` 与调试页下拉同步；`shell` 为开发期内部值，映射 local 并 warn）。触点：`src/core/debug.rs` HostMode / `src/main.rs` / `src/ui/debug.rs`。
+- **多客户端**：CLI `debug start --clients N`（附加凭证按凭证库顺序取，须有登录态）；多开间隔 6s 串行（凭证注入 user_info 单文件互斥）；pidfile 多行、stop 全杀。
+- **「本地服务器」标签页**（ui/local_server.rs + core/local_accounts.rs + core/local_play.rs）：SQLite 账号库（exe 旁 local_accounts.db，rusqlite bundled），账号创建/删除/每账号「启动/停止」；局未起时首个启动自动上传起局（控制连接全局持有保 0xF00C 日志通道）。
+- **本地账号 = 合成凭证直通**：`login=1 + token=local-<userid> + token_type=11` 即可过客户端大厅自动登录闸门，**全程零网络零真实凭证**（玩家甲/乙 90000002/90000001 双开进局实证 2026-09-02）——这也是整体验收「断网+无凭证」的通行证。
+- **多账号正确性**：登录应答/0x102 模板按实际 userid 原位补丁（varint 等长；本地账号 userid 90000001 起分配在 4 字节 varint 区间）。
+
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 
 数据源：中继全流量 capture（`host_capture-*.jsonl`，双会话：外部客户端 conv=0x14 + PIE conv=0x15）。

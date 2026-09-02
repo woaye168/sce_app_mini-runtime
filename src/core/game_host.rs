@@ -100,7 +100,8 @@ fn build_message(msg_type: u64, body: &[u8]) -> Vec<u8> {
 
 /// 进图初始化消息群（模板原序，跳过登录应答对；tick 模板由 tick 循环接管故跳过）
 /// lua 编排活跃时 0x7008 模板让位（UI 同步由 lua 侧 base.game:ui 驱动）
-fn send_burst(kcp: &mut KcpServer, conv: u32, lua_active: bool) {
+/// 全部模板过 userid 原位补丁（0x102 等含本人 uid 的消息随登录账号变化）
+fn send_burst(kcp: &mut KcpServer, conv: u32, lua_active: bool, userid: u64) {
     for &(ty, hexs) in tpl::H2C_SEQ.iter().skip(2) {
         if ty == 200711 {
             continue; // 0x31007 tick 由周期循环持续下发
@@ -108,7 +109,7 @@ fn send_burst(kcp: &mut KcpServer, conv: u32, lua_active: bool) {
         if lua_active && ty == 0x7008 {
             continue; // lua 编排接管玩法下发
         }
-        let body = tpl::unhex(hexs);
+        let body = patch_template_uid(&tpl::unhex(hexs), userid, None);
         let frame = build_message(ty, &body);
         kcp.send(conv, &frame);
     }
@@ -171,6 +172,41 @@ fn send_lua_out(
     }
 }
 
+/// 登录应答模板 userid 补丁：基准 capture 的本人 userid（38672742，varint 4B）在 type2 出现 2 处，
+/// 原位替换为实际登录 userid；varint 不等长（罕见超大 userid）时 warn 退化原模板（席位显示可能错，不断连）
+fn patch_template_uid(body: &[u8], new_uid: u64, expect: Option<usize>) -> Vec<u8> {
+    const BASE_UID: u64 = 38672742;
+    if new_uid == BASE_UID {
+        return body.to_vec();
+    }
+    let mut old = Vec::new();
+    host::put_varint(&mut old, BASE_UID);
+    let mut new = Vec::new();
+    host::put_varint(&mut new, new_uid);
+    if old.len() != new.len() {
+        println!("[game-host] [warn] userid={new_uid} varint 长度与模板基准不一致，登录应答用原模板（席位显示或不准）");
+        return body.to_vec();
+    }
+    let mut out = body.to_vec();
+    let mut i = 0;
+    let mut n = 0;
+    while i + old.len() <= out.len() {
+        if out[i..i + old.len()] == old[..] {
+            out[i..i + old.len()].copy_from_slice(&new);
+            n += 1;
+            i += old.len();
+        } else {
+            i += 1;
+        }
+    }
+    if let Some(expect) = expect {
+        if n != expect {
+            println!("[game-host] [warn] 登录应答模板 userid 补丁命中 {n} 处（预期 {expect}）——模板可能已漂移");
+        }
+    }
+    out
+}
+
 fn send_tick(kcp: &mut KcpServer, brain: &mut SessionBrain) {
     let mut body = Vec::new();
     host::put_field_varint(&mut body, 1, brain.tick_counter as u64);
@@ -202,6 +238,7 @@ fn send_1108(kcp: &mut KcpServer, conv: u32, probe_f1: u64, session_id: u64) {
 /// 前台阻塞跑壳 host（host start / debug start --host local 的线程体）
 pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Result<u16, String>>>) -> Result<()> {
     let state: ControlRef = host_server::new_state();
+    *STATE.lock().unwrap() = Some(Arc::clone(&state));
     let upload_root = params.runtime_dir.join("User").join("host_upload");
     // 控制面线程（TCP 5003）
     {
@@ -296,9 +333,11 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                             // 登录：{f1 userid, ...}
                             brain.userid = host::body_varint(&mbody, 1).unwrap_or(0);
                             println!("[game-host] 登录: userid={}", brain.userid);
-                            // 登录应答（模板 type 2）+ 0x15
+                            // 登录应答（模板 type 2，原位补丁本人 userid）+ 0x15
                             for &(ty2, hexs) in tpl::H2C_SEQ.iter().take(2) {
-                                let frame = build_message(ty2, &tpl::unhex(hexs));
+                                let body = tpl::unhex(hexs);
+                                let body = if ty2 == 2 { patch_template_uid(&body, brain.userid, Some(2)) } else { body };
+                                let frame = build_message(ty2, &body);
                                 kcp.send(conv, &frame);
                             }
                             host_server::push_log(&state, &format!("[shell-host] 玩家 {} 登录", brain.userid));
@@ -315,7 +354,7 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
                             if !brain.burst_done {
                                 brain.burst_done = true;
                                 println!("[game-host] 客户端加载完成，发送初始化消息群");
-                                send_burst(&mut kcp, conv, lua.is_some());
+                                send_burst(&mut kcp, conv, lua.is_some(), brain.userid);
                                 // 补发接入前挂起的广播（BOSS/技能书等先于玩家刷出的世界状态）
                                 if !pending_broadcast.is_empty() {
                                     let n = pending_broadcast.len();
@@ -388,6 +427,13 @@ pub fn run(params: GameHostParams, ready_tx: Option<std::sync::mpsc::Sender<Resu
 
 /// 幂等确保壳 host 在跑（GUI/CLI debug 复用）
 static RUNNING: Mutex<Option<u16>> = Mutex::new(None);
+/// 运行中 host 的控制面共享状态（「本地服务器」标签页查局状态用）
+static STATE: Mutex<Option<ControlRef>> = Mutex::new(None);
+
+/// 取运行中 host 的控制面状态（未运行 = None）
+pub fn control_state() -> Option<ControlRef> {
+    STATE.lock().unwrap().clone()
+}
 
 pub fn ensure_running(params: GameHostParams) -> Result<u16> {
     let mut g = RUNNING.lock().unwrap();
