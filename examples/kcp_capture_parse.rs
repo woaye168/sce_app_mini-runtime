@@ -682,6 +682,34 @@ fn cmd_dump(segs: &[Seg], conv_filter: Option<u32>, want: u64, count: usize) {
     }
 }
 
+/// export 子命令：导出某 conv 的 h2c 消息序列为 Rust 模板源（R3 壳 host 用）
+/// 用法: export <capture.jsonl> <conv hex> <out.rs> [截至 ts]
+/// 生成: pub static H2C_SEQ: &[(u64 msg_type, &str body_hex)]（按 ts 排序，type 2 之前的不含）
+fn cmd_export(segs: &[Seg], conv: u32, out_path: &str, until_ts: u64) {
+    let h2c = reassemble(segs, "udp.h2c", conv);
+    let mut dec = zcompress::ZDecoder::new();
+    let mut out = String::new();
+    out.push_str("//! AUTO-GENERATED：官方 host 的 h2c 消息序列模板（从基准 capture 提取，0.5.0 R3 壳 host 用）\n");
+    out.push_str("//! 工具：examples/kcp_capture_parse.rs `export` 子命令。内容含 test_res002 的地图/席位/会话数据。\n\n");
+    out.push_str("/// (msg_type, body_hex) 按时间序\n");
+    out.push_str("pub static H2C_SEQ: &[(u64, &str)] = &[\n");
+    let mut n = 0usize;
+    for f in &h2c {
+        if f.ts > until_ts {
+            break;
+        }
+        let Ok(plain) = zcompress::decode_frame(&mut dec, &f.body) else {
+            continue;
+        };
+        let Some((ty, bd)) = envelope(&plain) else { continue };
+        out.push_str(&format!("    ({ty}, \"{}\"), // ts={}\n", hex(&bd), f.ts));
+        n += 1;
+    }
+    out.push_str("];\n");
+    std::fs::write(out_path, out).expect("写模板失败");
+    println!("导出 {n} 条 h2c 消息模板 → {out_path}");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     if args.len() < 3 {
@@ -716,7 +744,13 @@ fn main() {
             let count: usize = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(3);
             cmd_dump(&segs, conv, want, count);
         }
-        _ => eprintln!("未知子命令: {cmd}（stats|flow|decode|msgs|dump）"),
+        "export" => {
+            let conv = u32::from_str_radix(args.get(3).expect("缺 conv"), 16).expect("conv 解析");
+            let out = args.get(4).expect("缺输出路径").clone();
+            let until: u64 = args.get(5).and_then(|s| s.parse().ok()).unwrap_or(u64::MAX);
+            cmd_export(&segs, conv, &out, until);
+        }
+        _ => eprintln!("未知子命令: {cmd}（stats|flow|decode|msgs|dump|export）"),
     }
 }
 

@@ -66,6 +66,10 @@ pub(crate) const MSG_EDITOR_START_GAME: u64 = 0xF012;
 pub(crate) const MSG_EDITOR_PING_RES: u64 = 0xF017;
 pub(crate) const MSG_EDITOR_START_GAME_RES: u64 = 0xF018;
 pub(crate) const MSG_UPLOAD_PROGRESS: u64 = 0xF01A;
+// 服务端方向（0.5.0 R3 自研 host 控制面新增，抓包/editor-debug-channels §2 实证）
+pub(crate) const MSG_WRITE_FILE_ACK: u64 = 0xF010; // SendWriteFileAck {f1=0, f2={f1 path, f2 project}}
+pub(crate) const MSG_DESTROY_GAME: u64 = 0xF01B; // 停止调试/销毁通知（停局 teardown）
+pub(crate) const MSG_EDITOR_HEARTBEAT: u64 = 0xF01F; // 编辑器心跳（安全忽略）
 
 /// 大文件分块阈值与块长（抓包实证：85KB 的走整发，168KB 的走 101400 分块）
 const BLOCK_SIZE: usize = 101400;

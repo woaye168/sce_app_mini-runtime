@@ -9,11 +9,12 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// 调试 host 模式：云端直连（现状默认）/ 本地自建 host（中继，core/local_host.rs）
+/// 调试 host 模式：云端直连（现状默认）/ 本地中继 / 本地壳 host（真本地，0.5.0 R3）
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum HostMode {
     Cloud,
     LocalRelay,
+    LocalShell,
 }
 
 /// 调试会话参数
@@ -255,6 +256,19 @@ impl DebugSession {
                     ip: "127.0.0.1".to_string(),
                     port,
                     token: "local".to_string(),
+                }
+            }
+            HostMode::LocalShell => {
+                log_warn("启动本地壳 host（真本地，无云端）...");
+                let port = crate::core::game_host::ensure_running(crate::core::game_host::GameHostParams {
+                    port: 5003,
+                    runtime_dir: params.runtime_dir.clone(),
+                })?;
+                log_warn(&format!("壳 host 已就绪: 127.0.0.1:{port}"));
+                host::HostInfo {
+                    ip: "127.0.0.1".to_string(),
+                    port,
+                    token: "shell".to_string(),
                 }
             }
         };

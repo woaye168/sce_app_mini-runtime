@@ -72,7 +72,7 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 - **B+（test_res002 类自研逻辑项目的真本地 host）**：游戏服务端不用引擎单位模拟（native 面仅 event_register/ui/proto/auxiliary/log/帧事件，§11），GameHost.lua 编排 + 薄 native shim 即可跑真玩法——**对本项目这是可达终点**；server_common 本地不可得但可用 script@199 近似（用户逆向结论：阉割客户端内容+加服务端内容）。
 - **C. 真本地 host（完整脱机）**：需要 host.exe（或等价 server 引擎）+ server 包，§4 已证全部渠道拿不到。**当前不可行**，除非官方开放 server 包下载或分发 host 二进制。
 
-## 9. ★ 中继 host 端到端验证（2026-09-02，M1~M3 交付）
+## 9. ★ 中继 host 端到端验证（2026-09-02，M1~M3 交付，已双链路验证）
 
 实现：`src/core/local_host.rs`（TCP 控制面协议感知中继 + UDP KCP NAT + 全流量 jsonl capture），CLI `host start` / `debug start --host local`，GUI 调试页 host 模式下拉（云端直连默认保留）。
 
@@ -90,6 +90,20 @@ sceengine.dll（version-13，editor 构建）全量字符串考古（证据件 `
 | 编辑器「调试(本地服务器)」 | 菜单（token=qwert 本地放行）→ 中继换真 token → 云端 → PIE KCP 127.0.0.1:53030→20820 | lua.game_info=StateGame，capture_game 截图确认 PIE 进局 |
 
 **排障纪律**：assign/云连接失败必须回 0xF001 result≠0，否则编辑器 `co.call(DebugManager.update_host)` 永远悬挂卡死调试管线（已内建 login_fail 闭包）。
+
+## 9.5 ★★★ 壳 host（真本地会话面，0.5.0 R3 交付）
+
+实现：`src/core/host_server.rs`（控制面 TCP 服务端）+ `src/core/kcp_server.rs`（CE1 握手 + KCP 服务端 + 3B 流分帧）+ `src/core/game_host.rs`（会话编排）+ `src/core/host_templates.rs`（官方 h2c 消息序列模板，AUTO-GENERATED）。入口：`host start --shell`（PIE 用）/ `debug start --host shell`（自带客户端拉起，CLI 常驻承载）。
+
+**行为基线 = scegame-reverse.md §13.9 的登录→进局序列**：登录应答模板（type 2 + 0x15）→ 客户端自驱进度 30/45/95/100 → msg 5 触发初始化消息群（模板原序：0x6/0x102/0x100/0x7008 __sync_game_info/0x112/0x5004/0x1129/0x1105/0x1120/0x10e/0x103/0x10d/0x109/Sync_* 全量集）→ 0x31007 tick（200ms 周期）+ 0xF100→0xf101 回显 + 0x1001→0x1108 应答。h2c 发送走 ZCompress 原样模式（§13.8 旁路）。0x6011/msg 5 收到即弃；0x7006 玩法上行壳期忽略。
+
+**踩坑记录**：
+- Windows UDP 绑定特异性：中继绑 127.0.0.1:5053 与壳 host 绑 0.0.0.0:5053 可共存，包投递给更具体的绑定——调试期僵尸中继会"劫持"客户端流量，症状 = 壳 host 零收包。排障先清场。
+- 起局信号同步把 `push_log` 放在 `state` 锁内 → Mutex 不可重入死锁（线程冻结于 起局，之后客户端 KCP 无人应答）。纪律：锁内只取标志，动作出锁再做。
+- 客户端 ping（0x1001→0x1108）校验「发送 sessionid == 接收 sessionid」：登录应答/0x1108/__sync_game_info 三处必须一致——壳期固定为基准 capture 的常量（GAME_SESSION_ID，免补丁）。
+- 客户端 CE1SYN ~10ms 快速重发：同一来源重复 SYN 必须复用既有会话（否则 conv 漂移）。
+
+**验收实录（2026-09-02）**：`debug start --host shell` 全链——控制面 EditorLogin/上传 1277 文件（逐文件 0xF010）/EditorStartGame → 客户端 KCP CE1 握手 → login result[0] → 客户端自驱加载 100% → 初始化消息群 → 客户端日志 "Game host notify loading finished / notify start game"（与官方会话逐行一致）→ 截图确认沙漠场景+HUD+角色渲染（玩法缺席为壳预期）。零 assign、零云端外联。
 
 ## 10. ★ KCP 会话协议初步分析（2026-09-02，中继 capture 实证）
 

@@ -258,7 +258,8 @@ fn cli_debug(args: &[String]) {
                         host_mode = match args.get(i + 1).map(|s| s.as_str()) {
                             Some("local") => core::debug::HostMode::LocalRelay,
                             Some("cloud") => core::debug::HostMode::Cloud,
-                            other => { eprintln!("--host 只支持 cloud|local，收到: {other:?}"); return; }
+                            Some("shell") => core::debug::HostMode::LocalShell,
+                            other => { eprintln!("--host 只支持 cloud|local|shell，收到: {other:?}"); return; }
                         };
                         i += 2;
                     }
@@ -311,12 +312,13 @@ fn cli_debug(args: &[String]) {
             match core::debug::DebugSession::start(&params) {
                 Ok(mut session) => {
                     println!("调试局已启动: session_id={} 客户端pid={}", session.session_id, session.pid());
-                    // 本地自建 host 模式：中继线程活在本进程，CLI 必须常驻（隐含 --hold 永久）
-                    let hold_forever = host_mode == core::debug::HostMode::LocalRelay;
+                    // 本地自建 host 模式：host 线程活在本进程，CLI 必须常驻（隐含 --hold 永久）
+                    let hold_forever = host_mode == core::debug::HostMode::LocalRelay
+                        || host_mode == core::debug::HostMode::LocalShell;
                     if hold_forever || hold_secs.is_some() {
                         let secs: u64 = hold_secs.as_deref().and_then(|s| s.parse().ok()).unwrap_or(0);
                         if hold_forever {
-                            println!("本地自建 host 模式：本进程是中继载体，保持运行（Ctrl+C 停止，客户端随之中断）...");
+                            println!("本地 host 模式：本进程是 host 载体，保持运行（Ctrl+C 停止，客户端随之中断）...");
                         } else {
                             println!("保持控制连接 {secs}s，收取 host 日志...");
                         }
@@ -392,6 +394,7 @@ fn cli_host(args: &[String]) {
             let mut env_domain = "editor-pd.spark.xd.com".to_string();
             let mut cred_label = None;
             let mut capture = None;
+            let mut shell = false;
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
@@ -400,13 +403,28 @@ fn cli_host(args: &[String]) {
                     "--env" => { env_domain = args.get(i + 1).cloned().unwrap_or(env_domain); i += 2; }
                     "--cred" => { cred_label = args.get(i + 1).cloned(); i += 2; }
                     "--capture" => { capture = args.get(i + 1).cloned(); i += 2; }
+                    "--shell" => { shell = true; i += 1; }
                     other => { eprintln!("未知参数: {other}"); return; }
                 }
             }
             let Some(project) = project else {
-                eprintln!("用法: host start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>]");
+                eprintln!("用法: host start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>] [--shell]");
                 return;
             };
+            // 壳 host（0.5.0 R3 真本地）：不 assign、不联云端、无需凭证
+            if shell {
+                let runtime_dir = std::env::current_exe()
+                    .map(|e| e.with_file_name("runtime"))
+                    .unwrap_or_else(|_| PathBuf::from("runtime"));
+                println!("项目 {project}，壳 host（真本地，无云端）启动...");
+                if let Err(e) = core::game_host::run(
+                    core::game_host::GameHostParams { port, runtime_dir },
+                    None,
+                ) {
+                    eprintln!("壳 host 退出: {e}");
+                }
+                return;
+            }
             let store = core::auth::CredentialStore::load();
             let label = cred_label.or(store.active_label.clone());
             let Some(label) = label else {

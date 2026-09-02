@@ -25,6 +25,10 @@ src/core/verify.rs     # 凭证校验
 src/core/runtimes.rs   # 运行时切换架子（RuntimeKind：编辑器-api/对战平台测试/正式；引擎包/spawn 目标/env 域）
 src/core/host.rs       # 调试 host 控制协议（EditorLogin/上传/起局/host 日志，手写 protobuf wire）
 src/core/local_host.rs # 自建 host（中继模式）：TCP 控制面中继 + UDP KCP NAT（会话端口=控制端口+50）+ 全流量 capture
+src/core/kcp_server.rs  # KCP 会话面服务端（CE1 握手 + KCP 服务端 + 3B 流分帧，单会话，§13.1-13.3）
+src/core/host_server.rs # 自研 host 控制面 TCP 服务端（0xF000 段：登录/逐文件 0xF010 ack/起局/0xF00C 日志/0xF01B teardown）
+src/core/game_host.rs   # 壳 host 编排（0.5.0 R3：登录应答+初始化消息群+tick/时钟/探测应答；R4 将换入 lua 编排）
+src/core/host_templates.rs # AUTO-GENERATED：官方 h2c 消息序列模板（kcp_capture_parse `export` 从基准 capture 提取）
 src/core/zcompress.rs  # ZCompress 复刻（h2c 传输层压缩，纯算法零依赖；格式权威 = doc/research/scegame-reverse.md §13.8）
 src/core/payload.rs    # 载荷同步：update-info + OSS 下载 + TNND/UPAK 落位 + 注册表合成 + 基座资产
 src/core/staging.rs    # 调试 staging 生成（白名单拷贝 + ui/script/main.lua 包装）
