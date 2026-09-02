@@ -25,40 +25,37 @@ fn lib_require_suffix(name: &str) -> &'static str {
     }
 }
 
-/// 生成暂存目录，返回路径。幂等（先清后建）。
+/// 生成暂存目录，返回路径。**增量**：不清目录，按 mtime+size 只更新变化的文件
+///（staging 硬链接时代与项目同卷；跨卷回退复制也只补差异——秒开的关键）。
 pub fn create(project_root: &Path, runtime_dir: &Path, project_name: &str) -> Result<PathBuf> {
     let dir_name = project_root
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .ok_or_else(|| anyhow!("项目路径异常"))?;
     let staging = runtime_dir.join("User").join("debug").join(&dir_name);
-    if staging.exists() {
-        // 清内容留目录（对齐 clear_folder 语义）
-        for entry in std::fs::read_dir(&staging)? {
-            let entry = entry?;
-            let p = entry.path();
-            if p.is_dir() {
-                std::fs::remove_dir_all(&p)?;
-            } else {
-                std::fs::remove_file(&p)?;
-            }
-        }
-    } else {
-        std::fs::create_dir_all(&staging)?;
-    }
+    std::fs::create_dir_all(&staging)?;
 
-    // 白名单复制
+    // 白名单目录增量同步（优先硬链接；目标已存在且同源（size+mtime 一致）则跳过）
+    let mut updated = 0u32;
+    let mut linked_mode = true;
     for d in DIRS {
         let src = project_root.join(d);
         if src.is_dir() {
-            copy_dir(&src, &staging.join(d))?;
+            if !sync_dir(&src, &staging.join(d), linked_mode, &mut updated)? {
+                linked_mode = false; // 硬链接不受支持（跨卷），后续目录走复制
+            }
         }
     }
     for f in FILES {
         let src = project_root.join(f);
         if src.is_file() {
-            std::fs::copy(&src, staging.join(f))?;
+            if sync_file(&src, &staging.join(f), linked_mode)? {
+                updated += 1;
+            }
         }
+    }
+    if updated > 0 {
+        crate::core::logbus::push(format!("[staging] 增量更新 {updated} 个文件（{}）", if linked_mode { "硬链接" } else { "复制" }));
     }
 
     // ui/script/main.lua：项目已有（编辑器/bgd 生成过）则沿用；否则按官方规则包装生成
@@ -160,17 +157,82 @@ return ret
     ))
 }
 
-fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
+/// 单文件增量同步（根级 FILES 用）：内容一致跳过，否则硬链接/复制
+fn sync_file(src: &Path, dst: &Path, linked_mode: bool) -> Result<bool> {
+    if files_equal(src, dst) {
+        return Ok(false);
+    }
+    if dst.exists() {
+        let _ = std::fs::remove_file(dst);
+    }
+    if let Some(p) = dst.parent() {
+        std::fs::create_dir_all(p)?;
+    }
+    if linked_mode && std::fs::hard_link(src, dst).is_ok() {
+        return Ok(true);
+    }
+    std::fs::copy(src, dst)?;
+    Ok(true)
+}
+
+/// 内容级一致判定：尺寸不等先快速否；同尺寸逐字节比对（分块读，不大内存）
+fn files_equal(a: &Path, b: &Path) -> bool {
+    let (Ok(ma), Ok(mb)) = (std::fs::metadata(a), std::fs::metadata(b)) else {
+        return false;
+    };
+    if ma.len() != mb.len() {
+        return false;
+    }
+    let (Ok(mut fa), Ok(mut fb)) = (std::fs::File::open(a), std::fs::File::open(b)) else {
+        return false;
+    };
+    use std::io::Read;
+    let mut ba = [0u8; 65536];
+    let mut bb = [0u8; 65536];
+    loop {
+        let na = fa.read(&mut ba).unwrap_or(0);
+        let nb = fb.read(&mut bb).unwrap_or(0);
+        if na != nb {
+            return false;
+        }
+        if na == 0 {
+            return true;
+        }
+        if ba[..na] != bb[..nb] {
+            return false;
+        }
+    }
+}
+
+/// 目录树增量同步：递归逐文件判定。**硬链接仅在从未成功过的目录尝试**（hard_link 失败一次
+/// 即整体转复制模式，避免"内容判定后 remove+hard_link 失败"丢文件），返回 false 由调用方转复制。
+/// changed 全局记忆：父目录发生过更新后，其余兄弟目录一律走复制模式（防 linked 残留判定漏拷）。
+fn sync_dir(src: &Path, dst: &Path, linked_mode: bool, updated: &mut u32) -> Result<bool> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let s = entry.path();
         let d = dst.join(entry.file_name());
         if s.is_dir() {
-            copy_dir(&s, &d)?;
+            if !sync_dir(&s, &d, linked_mode, updated)? {
+                return Ok(false);
+            }
+        } else if files_equal(&s, &d) {
+            continue;
+        } else if linked_mode && !d.exists() {
+            // 快路径：目标不存在（首装）直接硬链接；失败 = 跨卷，整体降级
+            if std::fs::hard_link(&s, &d).is_err() {
+                std::fs::copy(&s, &d)?;
+                *updated += 1;
+                return Ok(false);
+            }
+            *updated += 1;
         } else {
+            // 复制模式（或 linked 但目标已存在）：remove+hard_link 有"先删后失败"丢文件风险，
+            // 一律覆盖复制（硬链接的收益只在首装）
             std::fs::copy(&s, &d)?;
+            *updated += 1;
         }
     }
-    Ok(())
+    Ok(true)
 }

@@ -127,6 +127,8 @@ fn send_editor_log(s: &mut TcpStream, project: &str, entry: &LogEntry) {
 struct UploadCtx {
     project: String,
     dir: PathBuf,
+    /// 上传开始时刻（增量判定基准：目标 mtime ≥ 此时刻 = 本轮已写过，直接落盘）
+    start: std::time::SystemTime,
     /// 当前分块收集中的文件（0xF004 空声明创建）
     pending: HashMap<String, Vec<u8>>,
 }
@@ -145,6 +147,21 @@ fn write_upload(ux: &mut UploadCtx, path: &str, content: &[u8]) -> Result<()> {
     }
     std::fs::write(&abs, content)?;
     Ok(())
+}
+
+/// 增量判定：目标存在且 mtime < 本轮上传开始时刻 = 历史轮已上传过且内容无时间线索引 →
+/// 需要逐字节比对才敢说一致（跳过读+比对的成本与直接写相当），故保守直接写。
+/// 真正的省时在客户端侧（只传变化文件）。本函数保留 mtime 快判通道：
+/// 目标 mtime ≥ start = 本轮重复上传（编辑器可能重发），直接跳过。
+fn maybe_skip_upload(ux: &UploadCtx, path: &str) -> bool {
+    let rel = path
+        .strip_prefix(&format!("{}/", ux.project))
+        .unwrap_or(path);
+    let abs = ux.dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    std::fs::metadata(&abs)
+        .and_then(|m| m.modified())
+        .map(|mt| mt >= ux.start)
+        .unwrap_or(false)
 }
 
 /// 单条控制连接的处理（编辑器或本应用 CLI）
@@ -189,9 +206,10 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                     upload = Some(UploadCtx {
                         project: proj.clone(),
                         dir: upload_root.join(&proj),
+                        start: std::time::SystemTime::now(),
                         pending: HashMap::new(),
                     });
-                    let _ = std::fs::remove_dir_all(upload_root.join(&proj));
+                    // 不再先清空旧目录：write_upload 本就是覆盖写，秒级起步比目录洁癖重要
                     crate::srv_log!("[host-ctl] 上传开始: {proj} → {}", crate::core::disp(&upload_root.join(&proj)));
                 }
                 let Some(ux) = &mut upload else { continue };
@@ -226,7 +244,9 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                 };
                 match content {
                     Some(c) => {
-                        write_upload(ux, &path, &c)?;
+                        if !maybe_skip_upload(ux, &path) {
+                            write_upload(ux, &path, &c)?;
+                        }
                     }
                     None => {
                         // 空声明：登记分块收集

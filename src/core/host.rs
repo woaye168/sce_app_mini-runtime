@@ -327,11 +327,66 @@ impl HostControl {
             put_field_bytes(&mut body, 2, project.as_bytes());
             self.send_frame(MSG_FILE_END, &body)?;
             count += 1;
-            // 每 20 个文件抽干一次接收缓冲（防 TCP 窗口堵死）
-            if count % 20 == 0 {
+            // 流水线化：发送不停（本地 host ack 即发即回，TCP 缓冲足够），
+            // 每 200 文件抽干一次接收缓冲防 rbuf 无限涨（原每 20 文件一抽 = 一问一答，慢 10 倍）
+            if count % 200 == 0 {
                 self.drain();
             }
         }
+        self.drain();
+        Ok(count)
+    }
+
+    /// 增量上传（本地 host 同机专用）：直读目标端已有文件，**内容一致**则跳过传输，
+    /// 否则委托整发/分块路径。返回实际传输的文件数。
+    pub fn upload_project_incremental(&mut self, staging: &Path, project: &str, upload_dir: &Path) -> Result<u32> {
+        let mut files = Vec::new();
+        collect_files(staging, staging, &mut files)?;
+        files.sort();
+        let mut count = 0u32;
+        for rel in &files {
+            let abs = staging.join(rel);
+            let rel_unix = rel.replace('\\', "/");
+            // 与 upload_project 同款小写路径
+            let path = format!("{project}/{rel_unix}").to_lowercase();
+            // 目标端比对按小写路径（write_upload 落盘即小写，两侧对齐才能增量命中）
+            let dst = upload_dir.join(path.strip_prefix(&format!("{project}/")).unwrap_or(&path).replace('/', std::path::MAIN_SEPARATOR_STR));
+            let content = std::fs::read(&abs)
+                .map_err(|e| anyhow!("读项目文件失败 {}: {e}", abs.display()))?;
+            // 内容一致 = 未变（同尺寸逐字节比对；尺寸不等必变）
+            let unchanged = std::fs::read(&dst).map(|d| d == content).unwrap_or(false);
+            if unchanged {
+                continue;
+            }
+            if content.len() <= BLOCK_SIZE {
+                let mut body = Vec::new();
+                put_field_bytes(&mut body, 1, path.as_bytes());
+                put_field_bytes(&mut body, 2, project.as_bytes());
+                put_field_bytes(&mut body, 3, &content);
+                self.send_frame(MSG_SEND_WRITE_FILE, &body)?;
+            } else {
+                let mut decl = Vec::new();
+                put_field_bytes(&mut decl, 1, path.as_bytes());
+                put_field_bytes(&mut decl, 2, project.as_bytes());
+                self.send_frame(MSG_SEND_WRITE_FILE, &decl)?;
+                for chunk in content.chunks(BLOCK_SIZE) {
+                    let mut body = Vec::new();
+                    put_field_bytes(&mut body, 1, path.as_bytes());
+                    put_field_bytes(&mut body, 2, chunk);
+                    put_field_bytes(&mut body, 3, project.as_bytes());
+                    self.send_frame(MSG_SEND_FILE_BLOCK, &body)?;
+                }
+            }
+            let mut body = Vec::new();
+            put_field_bytes(&mut body, 1, path.as_bytes());
+            put_field_bytes(&mut body, 2, project.as_bytes());
+            self.send_frame(MSG_FILE_END, &body)?;
+            count += 1;
+            if count % 200 == 0 {
+                self.drain();
+            }
+        }
+        self.drain();
         Ok(count)
     }
 

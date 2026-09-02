@@ -57,10 +57,15 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
         .join("debug")
         .join(&dir_name);
 
-    // ② 局：未起则生成 staging + 控制面上传 + 起局
+    // ② 局：未起则生成 staging + 控制面上传 + 起局；
+    // 已起且 staging 就绪（入口包装已生成）则跳过上传直接拉起——秒进
     if game_active().is_none() {
+        let t0 = std::time::Instant::now();
         let staging_dir = crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
-        log("局未起，控制连接上传项目...".into());
+        log(format!("staging 生成完成（{:.1?}），控制连接上传项目...", t0.elapsed()));
+        let t1 = std::time::Instant::now();
+        // 本地 host 同机：直读目标端做内容级增量（变化的文件才走 TCP 上传）
+        let upload_dir = params.runtime_dir.join("User").join("host_upload").join(&project_name);
         let mut ctl = crate::core::host::HostControl::connect(
             &crate::core::host::HostInfo {
                 ip: "127.0.0.1".into(),
@@ -69,8 +74,8 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
             },
             params.account.userid,
         )?;
-        let count = ctl.upload_project(&staging_dir, &project_name)?;
-        log(format!("上传完成（{count} 个文件），EditorStartGame..."));
+        let count = ctl.upload_project_incremental(&staging_dir, &project_name, &upload_dir)?;
+        log(format!("上传完成（{count} 个文件，{:.1?}），EditorStartGame...", t1.elapsed()));
         let libs = crate::core::debug::resolve_libs(
             &params.project_root,
             &params.runtime_dir,
@@ -81,6 +86,12 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
         let session_id = ctl.wait_start_game_res(std::time::Duration::from_secs(120))?;
         log(format!("局已起: session_id={session_id}"));
         *GAME_CTL.lock().unwrap() = Some(ctl);
+    } else if !staging_dir.join("ui").join("script").join("main.lua").is_file() {
+        // 局在跑但 staging 是旧产物（如 0.5.0 之前生成）：补一次 staging（复制/链接）
+        // 注意：不重建已存在内容（避免撞运行中客户端文件锁），只补缺
+        if !staging_dir.exists() {
+            crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
+        }
     }
 
     // ③ 合成凭证注入（单文件互斥：调用方负责间隔；客户端可能仍持读句柄， sharing 冲突重试）

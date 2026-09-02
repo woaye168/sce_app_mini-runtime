@@ -36,7 +36,7 @@ src/core/logbus.rs      # 服务器日志总线（srv_log! 宏 = println! + 环�
 src/core/host_templates.rs # AUTO-GENERATED：官方 h2c 消息序列模板（kcp_capture_parse `export` 从基准 capture 提取）
 src/core/zcompress.rs  # ZCompress 复刻（h2c 传输层压缩，纯算法零依赖；格式权威 = doc/research/scegame-reverse.md §13.8）
 src/core/payload.rs    # 载荷同步：update-info + OSS 下载 + TNND/UPAK 落位 + 注册表合成 + 基座资产
-src/core/staging.rs    # 调试 staging 生成（白名单拷贝 + ui/script/main.lua 包装）
+src/core/staging.rs    # 调试 staging 生成（白名单**内容级增量**同步：files_equal 逐字节比对跳过未变文件；首装硬链接快路径、跨卷自动降级复制；ui/script/main.lua 包装）
 src/core/debug.rs      # B 模式编排：assign_host → 上传 → 起局 → spawn（CreateProcessW 防管道继承）
 src/core/capture.rs    # 游戏窗口截屏（WGC，自验用）
 src/core/locate.rs     # 官方目录推导（项目 tsconfig typeRoots 链）
