@@ -62,7 +62,7 @@ app.json               # 应用市场静态元数据（不含版本；CI 合成 
 | `entrance_sniff` | Entrance 协议帧明文 dump（hook 发送函数+接收日志点，云变量 0xA000 全双向；RVA 可用环境变量覆盖） |
 | `entrance_client` | Entrance 直连客户端：绕过引擎直读直写云变量（read/seti/sets/list；协议见 doc/research/lowlevel/cloudvar-04~06） |
 | `capture_parse` | jsonl 分析：`frames`（按消息逐帧 dump）/ `dump`（时间线递归 wire 解码）/ `blocks`（大文件分块序列） |
-| `kcp_capture_parse` | 中继 KCP 抓包分析（host_capture-*.jsonl）：`stats`（握手/conv/cmd 分布）/ `flow`（PUSH 去重 + wire dump + msgpack 串扫描）。零外部依赖，缺 libclang 时可 rustc 直编 |
+| `kcp_capture_parse` | 中继 KCP 抓包全解码（host_capture-*.jsonl）：`stats` / `flow` / `decode`（双向时间线回放，h2c 经 zcompress 解码 + cmsg_pack 直出 Req_*/Sync_*）/ `msgs`（聚合表）/ `dump <conv> <type> [n]`（按类型全量 dump）。逐段解析合并数据报。零外部依赖，缺 libclang 时可 rustc 直编 |
 | `restore_game` | 加密包一键还原：TNND → 7z → UPAK → 伪 KTX 图片转 PNG（BC1/2/3/7） |
 | `proto_extract` | 从 protobuf C++ 二进制提取内嵌 FileDescriptorProto |
 | `find_xref` / `disasm_at` | PE 字符串 RIP-xref 查找 / 线性反汇编（PE 解析手写在 examples/util） |

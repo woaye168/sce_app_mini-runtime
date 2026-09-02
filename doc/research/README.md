@@ -34,7 +34,7 @@
 | --- | --- |
 | `frida_capture` / `entrance_login_capture` | 抓包（socket 层 / SSL 明文层） |
 | `capture_parse` | 抓包 jsonl 解析（控制协议切帧/wire 解码） |
-| `kcp_capture_parse` | KCP 会话抓包解析（host_capture-*.jsonl，见 scegame-reverse.md §13） |
+| `kcp_capture_parse` | KCP 会话抓包全解码（host_capture-*.jsonl，stats/flow/decode/msgs/dump，见 scegame-reverse.md §13） |
 | `restore_game` | 加密包还原（TNND/7z/UPAK/KTX） |
 | `proto_extract` | protobuf descriptor 提取（结论：官方手写 wire 无 descriptor） |
 | `pe_imports` / `pe_exports` | PE 导入/导出表（定位 TLS/网络栈归属） |

@@ -456,11 +456,67 @@ h2c 帧 = `[3B LE 帧长][ZCompress(消息)]`。**无密钥无密码学，只剩
 
 **Frida oracle 手法（复用价值高）**：hook `SCEEngine.dll` RVA 0x1ac4ab0（解码入口），onEnter 读 reader（`[rdx]=base [rdx+8]=end`）取输入，onLeave 读输出向量（`[r8]=count [r8+8]=base`）取明文。脚本 `test/temp/zc_oracle.py`，对账器 `test/temp/zc_check.rs`。
 
-### 13.7 分析工具与 oracle 手法
+### 13.9 ★★★ h2c 应用层消息表 + 登录→进局全消息序列（2026-09-02，R2 全解码产出）
+
+> 工具：`examples/kcp_capture_parse.rs` 升级为全解码（新子命令 `decode`（时间线回放）/ `msgs`（聚合表）/ `dump <conv> <type> [n]`（按类型全量 dump）；**逐段解析合并数据报**；h2c 经 zcompress.rs 解码）。
+> 验收：基准 capture 1788302184（0.4.0 验证局，conv 0x14+0x15）全量回放 0 解码失败；新基准 1788336006（conv 0x6）1704 行时间线 0 失败。Req_*/Sync_* 人眼可读。
+> 信封结构（双向通用）：`外层 {f1: header_bytes}`，header = `{f1 varint msg_type, f2 bytes body}`。
+
+**c2h（明文）消息表**：
+
+| msg_type | 语义 | body 布局 | 频次特征 |
+| --- | --- | --- | --- |
+| 1 | 登录 | `{f1 userid, f2 "userid"字符串, f6 "", f7=1, f8=1}` | 连接建立后首发 |
+| 3 | 加载进度 | `{f1: 30/45/95/100}` 递增 | 客户端自驱，进图期 |
+| 5 | 状态 | `{f1: 0}` | 进图末期 1 次 |
+| 0x2000 | 心跳 | `{f1 i32, f2 i32}`（常为 0,0） | ~0.27s 周期 |
+| 0x6011 | UI 视图同步 | `{f1..f5, f6=UI路径字符串, f8 hash}` | UI 变化时 |
+| 0x7006 | **玩法上行** | `{f1: cmsg_pack {type:"Req_*", args}}` | 玩家操作驱动 |
+| 0x1001 | 周期探测（疑似 RTT/保活） | `{f1: 递增值, f2: 11B 载荷}` | ~1s，与 h2c 0x1108 成对 |
+| 0x7300 | 空 body | 进图后 1 次 |
+| 0xF100 | 时钟同步请求 | `{f1 {f1 unix_ms, f2 conv}, f2 double}` | 周期，与 h2c 0xf101 成对 |
+
+**h2c（ZCompress 压缩）消息表**：
+
+| msg_type | 语义 | body 布局 | 备注 |
+| --- | --- | --- | --- |
+| 2 | 登录应答 | 340B：`{f1=0, f2={f1 session_id, f2=5, f3={f1 "p_55a3"}(地图id), f4×N=玩家席位表{f1 userid/序号/等级…}, f6=127}, f3={f1 "FluctuateThreshold", f3=150}, f4 f32, f5=本人 userid, f6=1}` | 登录后立即下发 |
+| 0x15 | 登录后小状态 | `{f1=0, f2={repeated {f1 id, f2 value}}}`（2 组 (0,0),(1,0)） | 跟随登录应答 |
+| 0x31007 | **服务器 tick 驱动** | `{f1: 递增计数}` | ~200ms 周期，最高频（748 次/局）——驱动客户端 `base.event.on_update` 族 |
+| 0x1108 | 0x1001 的应答 | 50B | 成对 |
+| 0xf101 | 时钟同步应答 | | 与 0xF100 成对 |
+| 0x7008 | **玩法下发（UI 消息通道）** | `{f1: cmsg_pack args（map）, f2: seq 序号, f3: type_id, f4: type_name（仅该 type_id 首次出现携带）}` | = 客户端 `on_ui_message_new(str=f1, type_id=f3, type_name=f4)` 的线格式；Sync_*/S2C_* 全走这里 |
+| 0x6 / 0x100 / 0x109 | 空 body 控制消息 | | 进图期各 1 次 |
+| 0x102 | `{f1=0, f2={f1=userid, f2="", f3=0, f4=1}}` | ×2 | 进图期 |
+| 0x112 / 0x1105 / 0x1120 / 0x103 | 进图大消息（1403B/1254B/811B/476B） | 场景/单位全量初始化 | |
+| 0x5004 / 0x10d / 0x10e / 0x1129 | 进图中小消息 | 0x10d 含 "GameMode" 字符串 | |
+| 0x1128 | `{f1=0, f2={f1: fixed64?}}` | ×123 | 周期 |
+
+**登录→进局全消息序列（conv 0x6 实测，ts 为相对 ms）**——host 侧每阶段职责即 R3 的行为基线：
+
+```
+c→h 1 登录(userid)                                    ← KCP 建连后客户端主动登录
+h→c 2 登录应答(session_id/地图 p_55a3/席位表/FluctuateThreshold=150)
+h→c 0x15 小状态
+c→h 3 加载进度 30 → 45（客户端自驱，host 无需应答）
+c→h 0x2000 心跳开始（~0.27s 周期，host 无需应答）
+c→h 3 进度 95；c→h 0x7006 Req_PlayerList（客户端开始请求玩法数据）
+c→h 3 进度 100；c→h 5 状态(0)；c→h 0x6011 UI 视图同步
+h→c 0x6（空）→ 0x102 → 0x31007 tick 开始（此后 ~200ms 周期不断）→ 0x100（空）
+h→c 0x7008 __sync_game_info(session_id)  ← 玩法通道首开
+h→c 0x112(1403B) → 0x5004 → 0x1129 → 0x1105(1254B) → 0x1120(811B) → 0x10e → 0x103(476B) → 0x10d(GameMode) → 0x102 → 0x109（空）  ← 进图初始化消息群
+h→c 0x7008 ×N：Sync_PlayerList/PlayerStats/Scoreboard/BagData/ShopData/SkillLevels/PlayerTeamMap（+ensure 重发一轮）→ S2C_async_nick
+h→c 0x103(25B)；c→h 0x7300（空）→ c→h 0x6011；h→c 0x7008 ticket_info_update
+此后稳态：c→h 0x2000 心跳 / 0x1001 ↔ h→c 0x1108 / 0xF100 ↔ 0xf101 / h→c 0x31007 tick / 0x1128 / 玩法 0x7006→0x7008
+```
+
+**对 R3 的硬性结论**：① 客户端 0x6011 与 msg 5 收到即弃（host 不处理不断连）；② 登录必须应答 type 2 + 0x15（否则客户端卡在登录）；③ 0x31007 tick 必须持续下发（客户端逻辑帧由它驱动，200ms 周期）；④ 玩法请求 0x7006 的应答走 0x7008（f3 type_id 可按到达顺序递增分配，f4 首次携带名字）。
+
+### 13.10 分析工具与 oracle 手法
 
 | 工具/手法 | 用途 |
 | --- | --- |
-| `examples/kcp_capture_parse.rs` | host_capture jsonl：stats（握手/conv/cmd 分布）/ flow（PUSH 去重 + wire dump + ASCII 串扫描）；零外部依赖可 rustc 直编 |
+| `examples/kcp_capture_parse.rs` | host_capture jsonl 全解码：stats / flow / **decode（时间线回放）/ msgs（聚合表）/ dump（按 msg_type 全量 dump）**；逐段解析合并数据报；h2c 经 zcompress.rs 解码；零外部依赖可 rustc 直编 |
 | server 探针（临时 `src/server/api_probe.lua`，已删，结论见 self-host.md §11） | 云端 server VM 内 dump 全局/package.loaded/base.* → log.info → 0xF00C 回读（用后还原） |
 | VM hook `on_ui_message(_new)` | h2c 语义流取证（绕过压缩层） |
 | `cmsg_pack.pack` 已知明文生成 | 与抓包字节对照，推 ZCompress/分帧格式 |
