@@ -11,7 +11,7 @@ use std::time::Duration;
 
 // ---------- protobuf wire 手写编码（官方就是手写 wire，无 descriptor） ----------
 
-pub(crate) fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
+pub fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
     loop {
         let b = (v & 0x7F) as u8;
         v >>= 7;
@@ -23,12 +23,12 @@ pub(crate) fn put_varint(buf: &mut Vec<u8>, mut v: u64) {
     }
 }
 
-pub(crate) fn put_field_varint(buf: &mut Vec<u8>, field: u32, v: u64) {
+pub fn put_field_varint(buf: &mut Vec<u8>, field: u32, v: u64) {
     put_varint(buf, ((field << 3) as u64) | 0);
     put_varint(buf, v);
 }
 
-pub(crate) fn put_field_bytes(buf: &mut Vec<u8>, field: u32, data: &[u8]) {
+pub fn put_field_bytes(buf: &mut Vec<u8>, field: u32, data: &[u8]) {
     put_varint(buf, ((field << 3) as u64) | 2);
     put_varint(buf, data.len() as u64);
     buf.extend_from_slice(data);
@@ -55,27 +55,27 @@ pub(crate) fn get_varint(data: &[u8], pos: &mut usize) -> Result<u64> {
 // ---------- 帧编解码 ----------
 
 /// 消息类型（0xF000 段，抓包实证）
-pub(crate) const MSG_EDITOR_LOGIN: u64 = 0xF000;
-pub(crate) const MSG_EDITOR_LOGIN_RESULT: u64 = 0xF001;
+pub const MSG_EDITOR_LOGIN: u64 = 0xF000;
+pub const MSG_EDITOR_LOGIN_RESULT: u64 = 0xF001;
 pub(crate) const MSG_SEND_WRITE_FILE: u64 = 0xF004;
 pub(crate) const MSG_SEND_FILE_BLOCK: u64 = 0xF008;
 pub(crate) const MSG_FILE_END: u64 = 0xF00A;
-pub(crate) const MSG_NOTIFY_EDITOR_LOG: u64 = 0xF00C;
-pub(crate) const MSG_EDITOR_PING: u64 = 0xF011;
+pub const MSG_NOTIFY_EDITOR_LOG: u64 = 0xF00C;
+pub const MSG_EDITOR_PING: u64 = 0xF011;
 pub(crate) const MSG_EDITOR_START_GAME: u64 = 0xF012;
-pub(crate) const MSG_EDITOR_PING_RES: u64 = 0xF017;
+pub const MSG_EDITOR_PING_RES: u64 = 0xF017;
 pub(crate) const MSG_EDITOR_START_GAME_RES: u64 = 0xF018;
 pub(crate) const MSG_UPLOAD_PROGRESS: u64 = 0xF01A;
 // 服务端方向（0.5.0 R3 自研 host 控制面新增，抓包/editor-debug-channels §2 实证）
 pub(crate) const MSG_WRITE_FILE_ACK: u64 = 0xF010; // SendWriteFileAck {f1=0, f2={f1 path, f2 project}}
-pub(crate) const MSG_DESTROY_GAME: u64 = 0xF01B; // 停止调试/销毁通知（停局 teardown）
+pub const MSG_DESTROY_GAME: u64 = 0xF01B; // 停止调试/销毁通知（停局 teardown）
 pub(crate) const MSG_EDITOR_HEARTBEAT: u64 = 0xF01F; // 编辑器心跳（安全忽略）
 
 /// 大文件分块阈值与块长（抓包实证：85KB 的走整发，168KB 的走 101400 分块）
 const BLOCK_SIZE: usize = 101400;
 
 /// 组帧：u32 LE 总长（含自身）+ 0x00 + envelope{ f1: header{ f1 type, f2 body } }
-pub(crate) fn encode_frame(msg_type: u64, body: &[u8]) -> Vec<u8> {
+pub fn encode_frame(msg_type: u64, body: &[u8]) -> Vec<u8> {
     let mut header = Vec::new();
     put_field_varint(&mut header, 1, msg_type);
     put_field_bytes(&mut header, 2, body);
@@ -96,7 +96,7 @@ pub struct Frame {
     pub body: Vec<u8>,
 }
 
-pub(crate) fn decode_frame(data: &[u8]) -> Result<Frame> {
+pub fn decode_frame(data: &[u8]) -> Result<Frame> {
     let mut pos = 4; // 跳过 total_len
     let _flag = data[pos];
     pos += 1;
@@ -106,7 +106,12 @@ pub(crate) fn decode_frame(data: &[u8]) -> Result<Frame> {
         return Err(anyhow!("envelope tag 异常: {tag:#x}"));
     }
     let elen = get_varint(data, &mut pos)? as usize;
-    let env = &data[pos..pos + elen];
+    // checked_add 防 pos+elen 溢出回绕绕过边界检查（长度字段为不可信网络输入）
+    let eend = pos
+        .checked_add(elen)
+        .filter(|&e| e <= data.len())
+        .ok_or_else(|| anyhow!("envelope 长度越界: {elen}"))?;
+    let env = &data[pos..eend];
     let mut epos = 0;
     let t1 = get_varint(env, &mut epos)?;
     if t1 != 0x08 {
@@ -349,8 +354,9 @@ impl HostControl {
             let rel_unix = rel.replace('\\', "/");
             // 与 upload_project 同款小写路径
             let path = format!("{project}/{rel_unix}").to_lowercase();
-            // 目标端比对按小写路径（write_upload 落盘即小写，两侧对齐才能增量命中）
-            let dst = upload_dir.join(path.strip_prefix(&format!("{project}/")).unwrap_or(&path).replace('/', std::path::MAIN_SEPARATOR_STR));
+            // 目标端比对按小写路径（write_upload 落盘即小写，两侧对齐才能增量命中）；
+            // strip 前缀同样小写——project 含大写时原始大小写前缀永远 strip 不掉，会落嵌套目录
+            let dst = upload_dir.join(path.strip_prefix(&format!("{}/", project.to_lowercase())).unwrap_or(&path).replace('/', std::path::MAIN_SEPARATOR_STR));
             let content = std::fs::read(&abs)
                 .map_err(|e| anyhow!("读项目文件失败 {}: {e}", abs.display()))?;
             // 内容一致 = 未变（同尺寸逐字节比对；尺寸不等必变）
@@ -421,7 +427,10 @@ impl HostControl {
     }
 
     /// 抽干接收缓冲：处理 ack/进度/日志（非阻塞聚合）
+    /// 注意临时转非阻塞：连接读超时 200ms 是给 wait_for 用的，
+    /// drain 走超时语义会让调用方（如调试页每帧 poll）每次白等 200ms
     pub fn drain(&mut self) {
+        let _ = self.stream.set_nonblocking(true);
         let mut tmp = [0u8; 65536];
         loop {
             match self.stream.read(&mut tmp) {
@@ -430,9 +439,11 @@ impl HostControl {
                     self.rbuf.extend_from_slice(&tmp[..n]);
                     self.process_rbuf();
                 }
+                // WouldBlock（暂无数据）与真正错误统一退出
                 Err(_) => break,
             }
         }
+        let _ = self.stream.set_nonblocking(false);
     }
 
     fn process_rbuf(&mut self) {
@@ -551,13 +562,12 @@ pub(crate) fn body_string(body: &[u8], want_field: u32) -> Option<String> {
             }
             2 => {
                 let len = get_varint(body, &mut pos).ok()? as usize;
-                if pos + len > body.len() {
-                    return None;
-                }
+                // checked_add 防 pos+len 溢出回绕（不可信输入）
+                let end = pos.checked_add(len).filter(|&e| e <= body.len())?;
                 if field == want_field {
-                    return Some(String::from_utf8_lossy(&body[pos..pos + len]).to_string());
+                    return Some(String::from_utf8_lossy(&body[pos..end]).to_string());
                 }
-                pos += len;
+                pos = end;
             }
             5 => pos += 4,
             1 => pos += 8,

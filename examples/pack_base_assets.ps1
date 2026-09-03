@@ -55,6 +55,8 @@ try {
         $src, $dst = $pair
         if (-not (Test-Path $src)) { throw "源目录不存在: $src" }
         robocopy $src $dst /E /NFL /NDL /NJH /NJS /np | Out-Null
+        # robocopy 退出码 >=8 表示失败（$ErrorActionPreference 对原生进程不生效，需显式检查）
+        if ($LASTEXITCODE -ge 8) { throw "robocopy 失败($LASTEXITCODE): $src" }
         Write-Host "[ok] $src"
     }
     if (Test-Path $Out) { Remove-Item $Out -Force }

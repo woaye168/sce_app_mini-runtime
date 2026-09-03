@@ -145,8 +145,9 @@ fn resolve_import(
     }
     let off = va_to_off(pe, tgt)?;
     if data.get(off) == Some(&0xFF) && data.get(off + 1) == Some(&0x25) {
-        let disp = u32le(data, off + 2) as u64;
-        let slot = tgt + 6 + disp;
+        // FF 25 jmp [rip+disp32]：disp32 是有符号数（IAT 可能位于 stub 低地址侧）
+        let disp = i32::from_le_bytes(data.get(off + 2..off + 6)?.try_into().ok()?) as i64;
+        let slot = (tgt + 6).wrapping_add(disp as u64);
         return iat.get(&slot).cloned();
     }
     None

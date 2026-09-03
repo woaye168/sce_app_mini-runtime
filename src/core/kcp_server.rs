@@ -16,7 +16,9 @@ use std::io;
 use std::net::{SocketAddr, UdpSocket};
 use std::time::{Duration, Instant};
 
-const MAGIC_SYN: &[u8] = b"CE1SYN";
+/// 完整 SYN 包（13B：CE1SYN + 00000163b80305 固定尾）——精确匹配用：
+/// 前缀匹配会误中 CE1SYNACK / CE1SYN 后接垃圾，伪造包可批量制造空会话
+const MAGIC_SYN_FULL: &[u8] = b"CE1SYN\x00\x00\x01\x63\xb8\x03\x05";
 const MAGIC_ACK: &[u8] = b"CE1ACK";
 const MAGIC_SYACK: &[u8] = b"CE1SYACK";
 const MAGIC_SYNACK: &[u8] = b"CE1SYNACK";
@@ -32,6 +34,8 @@ const SYNACK_RETX: Duration = Duration::from_millis(150);
 const RTO: Duration = Duration::from_millis(200);
 /// 空闲超时（之后视为断开；官方发 CE1TIMEOUT，我们直接清理）
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+/// 单会话接收流缓冲硬上限（帧长字段最大 16MB + 一段余量；超限即失步/攻击，关会话）
+const STREAM_MAX: usize = 16 * 1024 * 1024 + SEG_PAYLOAD_MAX;
 
 fn now_ms() -> u32 {
     // KCP ts 只需单调；从进程启动起算的 ms 即可
@@ -112,6 +116,11 @@ impl KcpServer {
     /// 往会话追加一条应用消息（内部做 3B 流分帧 + PUSH 分段）
     pub fn send(&mut self, conv: u32, msg: &[u8]) {
         let Some(s) = self.sessions.get_mut(&conv) else { return };
+        if msg.len() + 3 > 0xFF_FFFF {
+            // 3B 帧长字段放不下：拒发并告警（否则写出截断的错误长度头，整个发送流自此失步）
+            crate::srv_log!("[kcp] 消息超 3B 帧长上限（{} 字节），拒发 conv={conv:#x}", msg.len());
+            return;
+        }
         let len = (msg.len() + 3) as u32;
         s.snd_stream.extend_from_slice(&len.to_le_bytes()[..3]);
         s.snd_stream.extend_from_slice(msg);
@@ -232,7 +241,8 @@ fn on_packet(
     events: &mut Vec<Event>,
 ) {
     // CE1 魔法族
-    if pkt.starts_with(MAGIC_SYN) {
+    // SYN 精确匹配完整 13B 包（starts_with 会误中 CE1SYNACK / CE1SYN+垃圾，伪造包可批量造空会话）
+    if pkt == MAGIC_SYN_FULL {
         // 同一来源的重复 SYN（客户端 ~10ms 重发）复用既有会话，不重复分配 conv
         if let Some((&conv, _)) = sessions.iter().find(|(_, s)| s.addr == from && !s.first_push_seen) {
             let mut syack = MAGIC_SYACK.to_vec();
@@ -240,6 +250,17 @@ fn on_packet(
             syack.extend_from_slice(&now_ms().to_le_bytes());
             let _ = sock.send_to(&syack, from);
             return;
+        }
+        // 同地址旧会话（客户端重连，旧会话尚在空闲超时内）：直接替换而非并存——
+        // 并存时 CE1ACK 按地址匹配必然归到旧会话，新会话永远等不到 established
+        let stale: Vec<u32> = sessions
+            .iter()
+            .filter(|(_, s)| s.addr == from)
+            .map(|(&c, _)| c)
+            .collect();
+        for c in stale {
+            sessions.remove(&c);
+            events.push(Event::Closed { conv: c });
         }
         let conv = *next_conv;
         *next_conv += 1;
@@ -258,11 +279,15 @@ fn on_packet(
                 continue;
             }
             if pkt == MAGIC_ACK {
-                s.established = true;
                 s.last_recv = Instant::now();
-                send_synack(sock, s);
-                s.last_synack = Instant::now();
-                hit = Some((*conv, false));
+                // 幂等：已建立会话收到重复 CE1ACK（丢包重发）只刷新活性，
+                // 不再产生 NewSession（否则 game_host 重置 brain，seq/type 映射中途清零）
+                if !s.established {
+                    s.established = true;
+                    send_synack(sock, s);
+                    s.last_synack = Instant::now();
+                    hit = Some((*conv, false));
+                }
             } else if pkt.starts_with(b"CE1DISCONNECT") || pkt.starts_with(b"CE1TIMEOUT") {
                 hit = Some((*conv, true));
             }
@@ -290,46 +315,71 @@ fn on_packet(
             break;
         }
         let payload = &pkt[off + 24..off + 24 + len];
-        let Some(s) = sessions.get_mut(&conv) else { return };
-        s.last_recv = Instant::now();
-        match cmd {
-            CMD_PUSH => {
-                s.first_push_seen = true;
-                // 立即 ACK（ts 回显）
-                send_ack(sock, s, sn, ts);
-                if sn >= s.rcv_nxt {
-                    s.rcv_buf.insert(sn, (ts, payload.to_vec()));
-                    // 按序交付到流
-                    while let Some((_, p)) = s.rcv_buf.remove(&s.rcv_nxt) {
-                        s.stream.extend_from_slice(&p);
-                        s.rcv_nxt += 1;
-                    }
-                    // 切 3B 帧
-                    loop {
-                        if s.stream.len() < 3 {
-                            break;
+        let mut kill_conv = false;
+        {
+            let Some(s) = sessions.get_mut(&conv) else {
+                // 未知 conv（会话刚关闭后到达的尾包拼报）：只跳过本段，
+                // 不 return 丢弃同数据报里属于健康会话的后续段
+                off += 24 + len;
+                continue;
+            };
+            s.last_recv = Instant::now();
+            match cmd {
+                CMD_PUSH => {
+                    s.first_push_seen = true;
+                    // 立即 ACK（ts 回显）
+                    send_ack(sock, s, sn, ts);
+                    // 接收窗口限制：仅接受 [rcv_nxt, rcv_nxt+WND) 内的段
+                    // （wrapping_sub 防序号回绕；窗口外的高 sn 是重放/攻击，无条件 insert 会灌爆 rcv_buf）
+                    if sn.wrapping_sub(s.rcv_nxt) < WND as u32 {
+                        s.rcv_buf.insert(sn, (ts, payload.to_vec()));
+                        // 按序交付到流
+                        while let Some((_, p)) = s.rcv_buf.remove(&s.rcv_nxt) {
+                            s.stream.extend_from_slice(&p);
+                            s.rcv_nxt += 1;
                         }
-                        let flen = s.stream[0] as usize
-                            | (s.stream[1] as usize) << 8
-                            | (s.stream[2] as usize) << 16;
-                        if flen < 3 || flen > 16 * 1024 * 1024 {
-                            // 失步（不应发生）：丢弃 1 字节重对齐
-                            s.stream.remove(0);
-                            continue;
+                        if s.stream.len() > STREAM_MAX {
+                            // 流缓冲硬上限（帧长字段谎称 ≤16MB 但后续字节不到齐时持续缓冲）：
+                            // 超限即失步/攻击，关会话防内存耗尽
+                            crate::srv_log!("[kcp] 会话流缓冲超限（{} 字节），关闭 conv={conv:#x}", s.stream.len());
+                            kill_conv = true;
+                        } else {
+                            // 切 3B 帧
+                            loop {
+                                if s.stream.len() < 3 {
+                                    break;
+                                }
+                                let flen = s.stream[0] as usize
+                                    | (s.stream[1] as usize) << 8
+                                    | (s.stream[2] as usize) << 16;
+                                if flen < 3 || flen > 16 * 1024 * 1024 {
+                                    // 失步（不应发生）：丢弃 1 字节重对齐
+                                    s.stream.remove(0);
+                                    continue;
+                                }
+                                if s.stream.len() < flen {
+                                    break;
+                                }
+                                let body = s.stream[3..flen].to_vec();
+                                s.stream.drain(..flen);
+                                events.push(Event::Message { conv, body });
+                            }
                         }
-                        if s.stream.len() < flen {
-                            break;
-                        }
-                        let body = s.stream[3..flen].to_vec();
-                        s.stream.drain(..flen);
-                        events.push(Event::Message { conv, body });
                     }
                 }
+                CMD_ACK => {
+                    s.unacked.retain(|u| u.sn != sn);
+                }
+                _ => {}
             }
-            CMD_ACK => {
-                s.unacked.retain(|u| u.sn != sn);
+        }
+        if kill_conv {
+            // 借用已释放，这里才真正移除会话（发 DISCONNECT 通知对端）
+            if let Some(s) = sessions.remove(&conv) {
+                let _ = sock.send_to(b"CE1DISCONNECT", s.addr);
             }
-            _ => {}
+            events.push(Event::Closed { conv });
+            break;
         }
         off += 24 + len;
     }

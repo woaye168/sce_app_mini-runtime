@@ -12,7 +12,7 @@ use anyhow::{anyhow, Result};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 /// staging 白名单（与 staging.rs 的 DIRS/FILES 保持同集合；那边是私有的，此处复制并注释同步义务）
@@ -24,11 +24,19 @@ const FILES: &[&str] = &["config.ini", "libs.json", "project.sce"];
 
 /// 请求头读取上限（防恶意超长头占内存）
 const MAX_HEADER: usize = 16 * 1024;
+/// 并发连接上限（防慢/恶意连接批量建连耗尽宿主线程）
+const MAX_CONNS: usize = 64;
+/// 活跃连接计数（配合 MAX_CONNS）
+static ACTIVE_CONNS: AtomicUsize = AtomicUsize::new(0);
+/// /base_assets 临时目录连接级唯一后缀（同进程并发请求共用 pid 会互踩）
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 pub struct DistribParams {
     pub port: u16,
     pub staging_dir: PathBuf,
     pub bind_addr: String,
+    /// 环境域名（基座资产 = <runtime>/Update/<域>/Res，由 RuntimeKind 决定，不能硬编码编辑器域）
+    pub env_domain: String,
 }
 
 /// 分发服务监听线程体（game_host 拉起）
@@ -40,6 +48,7 @@ pub fn run(params: DistribParams, stop: Arc<AtomicBool>) -> Result<()> {
     listener.set_nonblocking(true)?;
     crate::srv_log!("[distrib] 分发服务已监听 {addr}（staging = {}）", crate::core::disp(&params.staging_dir));
     let staging_dir = Arc::new(params.staging_dir);
+    let env_domain = Arc::new(params.env_domain);
     while !stop.load(Ordering::Relaxed) {
         match listener.accept() {
             Ok((stream, _)) => {
@@ -49,11 +58,18 @@ pub fn run(params: DistribParams, stop: Arc<AtomicBool>) -> Result<()> {
                     crate::srv_log!("[distrib] 还原阻塞模式失败: {e}");
                     continue;
                 }
+                if ACTIVE_CONNS.load(Ordering::Relaxed) >= MAX_CONNS {
+                    crate::srv_log!("[distrib] 活跃连接达上限 {MAX_CONNS}，拒绝新连接");
+                    continue; // stream 落出作用域即关闭
+                }
+                ACTIVE_CONNS.fetch_add(1, Ordering::Relaxed);
                 let dir = Arc::clone(&staging_dir);
+                let env = Arc::clone(&env_domain);
                 std::thread::spawn(move || {
-                    if let Err(e) = handle_conn(stream, &dir) {
+                    if let Err(e) = handle_conn(stream, &dir, &env) {
                         crate::srv_log!("[distrib] 连接结束: {e}");
                     }
+                    ACTIVE_CONNS.fetch_sub(1, Ordering::Relaxed);
                 });
             }
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -69,8 +85,10 @@ pub fn run(params: DistribParams, stop: Arc<AtomicBool>) -> Result<()> {
 /// 单连接处理：keep-alive 多请求循环（对端上千个文件逐一下载，一请求一连接
 /// 会让路由器 NAT 连接跟踪表剧烈抖动——外网实测中途 "error sending request"）。
 /// 读到 \r\n\r\n 即止（GET 无 body），30s 空闲超时自动关闭防线程悬挂。
-fn handle_conn(mut s: TcpStream, staging_dir: &Path) -> Result<()> {
+fn handle_conn(mut s: TcpStream, staging_dir: &Path, env_domain: &str) -> Result<()> {
     s.set_read_timeout(Some(std::time::Duration::from_secs(30)))?;
+    // 写超时：大文件响应对端不收数据时防线程永久卡在 write_all
+    s.set_write_timeout(Some(std::time::Duration::from_secs(60)))?;
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
     let mut chunk = [0u8; 4096];
     loop {
@@ -107,27 +125,31 @@ fn handle_conn(mut s: TcpStream, staging_dir: &Path) -> Result<()> {
         if method != "GET" {
             return respond(&mut s, 405, "text/plain", b"method not allowed", false);
         }
-        route(&mut s, &target, staging_dir, keep_alive)?;
+        route(&mut s, &target, staging_dir, env_domain, keep_alive)?;
         if !keep_alive {
             return Ok(());
         }
     }
 }
 
-/// 路由：解析 target 并写响应（keep-alive 由 handle_conn 循环维持）
-fn route(s: &mut TcpStream, target: &str, staging_dir: &Path, keep_alive: bool) -> Result<()> {
+/// 路由：解析 target 并写响应（keep-alive 由 handle_conn 循环维持）。
+/// 可预期错误一律转成 4xx/500 响应写出后再关连接（静默断连与 NAT 断连故障形态相同，无法排障）。
+fn route(s: &mut TcpStream, target: &str, staging_dir: &Path, env_domain: &str, keep_alive: bool) -> Result<()> {
 
     let (route, query) = target.split_once('?').unwrap_or((target, ""));
     match route {
-        "/manifest" => {
-            let body = build_manifest(staging_dir)?;
-            respond(s, 200, "application/json", body.as_bytes(), keep_alive)
-        }
+        "/manifest" => match build_manifest(staging_dir) {
+            Ok(body) => respond(s, 200, "application/json", body.as_bytes(), keep_alive),
+            Err(e) => {
+                crate::srv_log!("[distrib] manifest 生成失败: {e}");
+                respond(s, 500, "text/plain", b"internal error", keep_alive)
+            }
+        },
         "/base_assets" => {
             // 基座资产（update-info 不分发的编辑器资产）：房主本机已同步到
             // <runtime>/Update/<env>/Res + <runtime>/Res，打 zip 整体下发（对端零 GitHub token）。
             // staging 同级定位 runtime 根：staging = <runtime>/User/debug/<项目>
-            match build_base_assets(staging_dir) {
+            match build_base_assets(staging_dir, env_domain) {
                 Ok(bytes) => {
                     crate::srv_log!("[distrib] 基座资产打包下发 {} MB", bytes.len() / 1024 / 1024);
                     respond(s, 200, "application/octet-stream", &bytes, keep_alive)
@@ -139,10 +161,9 @@ fn route(s: &mut TcpStream, target: &str, staging_dir: &Path, keep_alive: bool) 
             }
         }
         "/file" => {
-            let raw = query
-                .split('&')
-                .find_map(|kv| kv.strip_prefix("path="))
-                .ok_or_else(|| anyhow!("/file 缺 path 参数"))?;
+            let Some(raw) = query.split('&').find_map(|kv| kv.strip_prefix("path=")) else {
+                return respond(s, 400, "text/plain", b"missing path parameter", keep_alive);
+            };
             let rel = url_decode(raw);
             match resolve_file(staging_dir, &rel) {
                 Ok(path) => {
@@ -164,9 +185,11 @@ fn route(s: &mut TcpStream, target: &str, staging_dir: &Path, keep_alive: bool) 
 fn respond(s: &mut TcpStream, code: u16, content_type: &str, body: &[u8], keep_alive: bool) -> Result<()> {
     let reason = match code {
         200 => "OK",
+        400 => "Bad Request",
         404 => "Not Found",
         405 => "Method Not Allowed",
         431 => "Request Header Fields Too Large",
+        500 => "Internal Server Error",
         _ => "Error",
     };
     let conn = if keep_alive { "keep-alive" } else { "close" };
@@ -180,17 +203,18 @@ fn respond(s: &mut TcpStream, code: u16, content_type: &str, body: &[u8], keep_a
 }
 
 /// 基座资产打包：从 runtime 根（staging 上三级：staging=User/debug/<项目>）收集
-/// Update/<env>/Res/{ui,fonts} + Res/{characters,effect}，打 7z 到内存返回
-fn build_base_assets(staging_dir: &Path) -> Result<Vec<u8>> {
+/// Update/<env>/Res/{ui,fonts} + Res/{characters,effect}，打 7z 到内存返回。
+/// env_domain 由房主运行时种类决定（payload 落位用同一域）；临时目录带连接级唯一后缀防并发互踩。
+fn build_base_assets(staging_dir: &Path, env_domain: &str) -> Result<Vec<u8>> {
     // staging = <runtime>/User/debug/<项目> → runtime = 上三级
     let runtime = staging_dir
         .ancestors()
         .nth(3)
         .ok_or_else(|| anyhow!("staging 路径层级不足"))?
         .to_path_buf();
-    let env = "editor-pd.spark.xd.com";
-    let res_root = runtime.join("Update").join(env).join("Res");
-    let tmp_x = std::env::temp_dir().join(format!("bgd_base_x_{}", std::process::id()));
+    let res_root = runtime.join("Update").join(env_domain).join("Res");
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_x = std::env::temp_dir().join(format!("bgd_base_x_{}_{}", std::process::id(), seq));
     let _ = std::fs::remove_dir_all(&tmp_x);
     // 复刻 base_assets.7z 结构：ui/+fonts/（Res 下）+ characters/+effect/（runtime/Res 下）
     let pairs = [
@@ -211,7 +235,7 @@ fn build_base_assets(staging_dir: &Path) -> Result<Vec<u8>> {
         return Err(anyhow!("runtime 内无基座资产（房主需先跑一次完整 payload sync）"));
     }
     // 注：bsdtar 不能写 7z（只读），改打 zip（read 端 `tar -xf` 自动识别，payload 解包无需改）
-    let tmp = std::env::temp_dir().join(format!("bgd_base_{}.zip", std::process::id()));
+    let tmp = std::env::temp_dir().join(format!("bgd_base_{}_{}.zip", std::process::id(), seq));
     let status = crate::core::silent_command("tar")
         .args(["-acf"])
         .arg(&tmp)

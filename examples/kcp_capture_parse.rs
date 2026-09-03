@@ -598,12 +598,16 @@ fn cmd_msgs(segs: &[Seg]) {
                     Some((ty, bd)) => {
                         if ty == 0x7006 || ty == 0x7008 {
                             let inner = gameplay_summary(&bd);
-                            // 提取 type 名
+                            // 提取 type 名：渲染形态 {key:value,...}，取 "type" 的 value
                             let name = inner
                                 .strip_prefix('{')
-                                .and_then(|s| s.split(':').next())
+                                .and_then(|s| s.splitn(2, ':').nth(1))
+                                .and_then(|v| {
+                                    v.trim_start_matches('"')
+                                        .split([',', '}', '"'])
+                                        .next()
+                                })
                                 .unwrap_or("")
-                                .trim_matches('"')
                                 .to_string();
                             if inner.starts_with("{\"type\"") || inner.starts_with("{type") {
                                 format!("0x7006 {}", name)

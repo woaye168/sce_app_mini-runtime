@@ -144,9 +144,12 @@ pub fn debug_short(v: &CVal) -> String {
     }
 }
 
+/// 嵌套深度上限：防深嵌套输入（网络上行）/ 环表耗尽 Rust 栈（栈溢出不可捕获直接 abort 进程）
+const MAX_DEPTH: usize = 128;
+
 /// 解析一个值；返回 (值, 消费长度)
 pub fn unpack(b: &[u8]) -> Option<(CVal, usize)> {
-    let (v, used) = unpack_at(b, 0)?;
+    let (v, used) = unpack_at(b, 0, 0)?;
     Some((v, used))
 }
 
@@ -168,7 +171,11 @@ fn be_u(b: &[u8], i: &mut usize, n: usize) -> Option<u64> {
     Some(v)
 }
 
-fn unpack_at(b: &[u8], start: usize) -> Option<(CVal, usize)> {
+fn unpack_at(b: &[u8], start: usize, depth: usize) -> Option<(CVal, usize)> {
+    // 深度超限直接拒包（返回 None 走"内层非 cmsg map"分支，不递归爆栈）
+    if depth > MAX_DEPTH {
+        return None;
+    }
     let mut i = start;
     let t = *b.get(i)?;
     i += 1;
@@ -209,7 +216,7 @@ fn unpack_at(b: &[u8], start: usize) -> Option<(CVal, usize)> {
             let n = (t & 0x0f) as usize;
             let mut a = Vec::with_capacity(n);
             for _ in 0..n {
-                let (x, end) = unpack_at(b, i)?;
+                let (x, end) = unpack_at(b, i, depth + 1)?;
                 i = end;
                 a.push(x);
             }
@@ -219,7 +226,7 @@ fn unpack_at(b: &[u8], start: usize) -> Option<(CVal, usize)> {
             let n = if t == 0xdc { be_u(b, &mut i, 2)? } else { be_u(b, &mut i, 4)? } as usize;
             let mut a = Vec::with_capacity(n.min(1 << 20));
             for _ in 0..n {
-                let (x, end) = unpack_at(b, i)?;
+                let (x, end) = unpack_at(b, i, depth + 1)?;
                 i = end;
                 a.push(x);
             }
@@ -229,8 +236,8 @@ fn unpack_at(b: &[u8], start: usize) -> Option<(CVal, usize)> {
             let n = (t & 0x0f) as usize;
             let mut m = Vec::with_capacity(n);
             for _ in 0..n {
-                let (k, e1) = unpack_at(b, i)?;
-                let (x, e2) = unpack_at(b, e1)?;
+                let (k, e1) = unpack_at(b, i, depth + 1)?;
+                let (x, e2) = unpack_at(b, e1, depth + 1)?;
                 i = e2;
                 m.push((k, x));
             }
@@ -240,8 +247,8 @@ fn unpack_at(b: &[u8], start: usize) -> Option<(CVal, usize)> {
             let n = if t == 0xde { be_u(b, &mut i, 2)? } else { be_u(b, &mut i, 4)? } as usize;
             let mut mm = Vec::with_capacity(n.min(1 << 20));
             for _ in 0..n {
-                let (k, e1) = unpack_at(b, i)?;
-                let (x, e2) = unpack_at(b, e1)?;
+                let (k, e1) = unpack_at(b, i, depth + 1)?;
+                let (x, e2) = unpack_at(b, e1, depth + 1)?;
                 i = e2;
                 mm.push((k, x));
             }
@@ -255,10 +262,18 @@ fn unpack_at(b: &[u8], start: usize) -> Option<(CVal, usize)> {
 // ---------- 与 mlua 的互转（lua_host 用；放在这里让 cmsg_pack 保持单一实现） ----------
 
 mod lua_conv {
-    use super::CVal;
+    use super::{CVal, MAX_DEPTH};
     use mlua::{Lua, Result, Value};
+    use std::collections::HashSet;
 
     pub fn to_lua(lua: &Lua, v: &CVal) -> Result<Value> {
+        to_lua_at(lua, v, 0)
+    }
+
+    fn to_lua_at(lua: &Lua, v: &CVal, depth: usize) -> Result<Value> {
+        if depth > MAX_DEPTH {
+            return Err(mlua::Error::external("cmsg_pack 嵌套深度超限"));
+        }
         Ok(match v {
             CVal::Nil => Value::Nil,
             CVal::Bool(b) => Value::Boolean(*b),
@@ -275,14 +290,14 @@ mod lua_conv {
             CVal::Array(a) => {
                 let t = lua.create_table()?;
                 for (i, x) in a.iter().enumerate() {
-                    t.set(i + 1, to_lua(lua, x)?)?;
+                    t.set(i + 1, to_lua_at(lua, x, depth + 1)?)?;
                 }
                 Value::Table(t)
             }
             CVal::Map(m) => {
                 let t = lua.create_table()?;
                 for (k, x) in m {
-                    t.set(to_lua(lua, k)?, to_lua(lua, x)?)?;
+                    t.set(to_lua_at(lua, k, depth + 1)?, to_lua_at(lua, x, depth + 1)?)?;
                 }
                 Value::Table(t)
             }
@@ -290,6 +305,15 @@ mod lua_conv {
     }
 
     pub fn from_lua(v: &Value) -> Result<CVal> {
+        let mut visited = HashSet::new();
+        from_lua_at(v, 0, &mut visited)
+    }
+
+    /// visited：当前递归路径上的表指针集合（仅检测环，跨分支共享子表不误报）
+    fn from_lua_at(v: &Value, depth: usize, visited: &mut HashSet<usize>) -> Result<CVal> {
+        if depth > MAX_DEPTH {
+            return Err(mlua::Error::external("cmsg_pack 嵌套深度超限"));
+        }
         Ok(match v {
             Value::Nil => CVal::Nil,
             Value::Boolean(b) => CVal::Bool(*b),
@@ -297,32 +321,44 @@ mod lua_conv {
             Value::Number(n) => CVal::F64(*n),
             Value::String(s) => CVal::Str(s.as_bytes().to_vec()),
             Value::Table(t) => {
-                // 数组判定：键必须【恰好】为 1..=len 且无额外键——稀疏整数键（如商店 bought={1..4,11..32}）
-                // raw_len 只量连续前缀，误判为数组会丢稀疏尾部（test_res002 已售罄不更新根因）
-                let mut pairs_v = Vec::new();
-                for pair in t.clone().pairs::<Value, Value>() {
-                    pairs_v.push(pair?);
+                // 环检测：lua 表可自指（t.self = t），遇环返回可捕获的 lua error 而不是栈溢出崩进程
+                let ptr = t.to_pointer() as usize;
+                if !visited.insert(ptr) {
+                    return Err(mlua::Error::external("cmsg_pack 不支持循环引用表"));
                 }
-                let len = t.raw_len();
-                let is_array = len > 0
-                    && pairs_v.len() == len
-                    && pairs_v
-                        .iter()
-                        .all(|(k, _)| matches!(k, Value::Integer(i) if *i >= 1 && *i as usize <= len));
-                if is_array {
-                    let mut a = vec![CVal::Nil; len];
-                    for (k, x) in pairs_v {
-                        let Value::Integer(i) = k else { unreachable!() };
-                        a[(i - 1) as usize] = from_lua(&x)?;
+                let r: Result<CVal> = (|| {
+                    // 数组判定：键必须【恰好】为 1..=len 且无额外键——稀疏整数键（如商店 bought={1..4,11..32}）
+                    // raw_len 只量连续前缀，误判为数组会丢稀疏尾部（test_res002 已售罄不更新根因）
+                    let mut pairs_v = Vec::new();
+                    for pair in t.clone().pairs::<Value, Value>() {
+                        pairs_v.push(pair?);
                     }
-                    CVal::Array(a)
-                } else {
-                    let mut m = Vec::with_capacity(pairs_v.len());
-                    for (k, x) in pairs_v {
-                        m.push((from_lua(&k)?, from_lua(&x)?));
+                    let len = t.raw_len();
+                    let is_array = len > 0
+                        && pairs_v.len() == len
+                        && pairs_v
+                            .iter()
+                            .all(|(k, _)| matches!(k, Value::Integer(i) if *i >= 1 && *i as usize <= len));
+                    if is_array {
+                        let mut a = vec![CVal::Nil; len];
+                        for (k, x) in pairs_v {
+                            let Value::Integer(i) = k else { unreachable!() };
+                            a[(i - 1) as usize] = from_lua_at(&x, depth + 1, visited)?;
+                        }
+                        Ok(CVal::Array(a))
+                    } else {
+                        let mut m = Vec::with_capacity(pairs_v.len());
+                        for (k, x) in pairs_v {
+                            m.push((
+                                from_lua_at(&k, depth + 1, visited)?,
+                                from_lua_at(&x, depth + 1, visited)?,
+                            ));
+                        }
+                        Ok(CVal::Map(m))
                     }
-                    CVal::Map(m)
-                }
+                })();
+                visited.remove(&ptr);
+                r?
             }
             Value::LightUserData(_) | Value::Function(_) | Value::Thread(_) | Value::UserData(_) => {
                 CVal::Nil

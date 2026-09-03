@@ -90,11 +90,10 @@ pub fn launch(params: &LocalPlayParams, log: &mut dyn FnMut(String)) -> Result<u
         log(format!("局已起: session_id={session_id}"));
         *GAME_CTL.lock().unwrap() = Some(ctl);
     } else if !staging_dir.join("ui").join("script").join("main.lua").is_file() {
-        // 局在跑但 staging 是旧产物（如 0.5.0 之前生成）：补一次 staging（复制/链接）
-        // 注意：不重建已存在内容（避免撞运行中客户端文件锁），只补缺
-        if !staging_dir.exists() {
-            crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
-        }
+        // 局在跑但 staging 缺入口（旧产物不完整，如 0.5.0 之前生成）：补一次 staging。
+        // staging::create 本身是增量的（内容一致跳过），天然只补缺不重建，
+        // 不会因重写未变化文件去撞运行中客户端的文件锁
+        crate::core::staging::create(&params.project_root, &params.runtime_dir, &project_name)?;
     }
 
     // ③ 合成凭证注入（单文件互斥：调用方负责间隔；客户端可能仍持读句柄， sharing 冲突重试）

@@ -132,11 +132,17 @@ fn wgc_capture(hwnd: *mut std::ffi::c_void, path: &Path) -> Result<(u32, u32)> {
         ColorFormat::Rgba8,
         tx,
     );
-    CapHandler::start(settings).map_err(|e| anyhow!("启动窗口捕获失败: {e}"))?;
-    let img = rx
-        .recv_timeout(Duration::from_secs(15))
-        .map_err(|_| anyhow!("窗口捕获超时（15s 未收到帧）"))?
-        .map_err(|e| anyhow!(e))?;
+    // start 是阻塞变体（占当前线程跑消息循环直到 stop），recv_timeout 永远执行不到；
+    // 改 start_free_threaded 后台跑捕获，主线程等帧，超时后 stop 回收线程
+    let control =
+        CapHandler::start_free_threaded(settings).map_err(|e| anyhow!("启动窗口捕获失败: {e}"))?;
+    let img = match rx.recv_timeout(Duration::from_secs(15)) {
+        Ok(r) => r.map_err(|e| anyhow!(e))?,
+        Err(_) => {
+            let _ = control.stop();
+            return Err(anyhow!("窗口捕获超时（15s 未收到帧）"));
+        }
+    };
     let (w, h) = (img.width(), img.height());
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;

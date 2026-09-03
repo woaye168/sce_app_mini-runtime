@@ -21,7 +21,11 @@ fn main() {
     let back = usize::from_str_radix(args[3].trim_start_matches("0x"), 16).expect("back 解析失败");
     let pe = PeInfo::parse(&data).expect("PE 解析失败（仅支持 PE32+）");
 
-    let start = off.saturating_sub(back);
+    if off >= data.len() {
+        eprintln!("偏移 {off:#x} 超出文件大小 {:#x}", data.len());
+        std::process::exit(1);
+    }
+    let start = off.saturating_sub(back).min(data.len());
     let blob = &data[start..(off + 0x40).min(data.len())];
     let base = pe.image_base + pe.rva_from_offset(start as u32).expect("起点不在任何节内") as u64;
 

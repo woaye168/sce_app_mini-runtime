@@ -25,9 +25,17 @@ const DIST_PORT_OFFSET: u16 = 80;
 fn main() -> eframe::Result<()> {
     // 无界面冒烟测试钩子：`mini-client --connect <ip> <port> <userid>`（联调/CI 用，不走 GUI）
     let args: Vec<String> = std::env::args().collect();
-    if args.len() == 5 && args[1] == "--connect" {
-        let port: u16 = args[3].parse().expect("端口须为数字");
-        let userid: i64 = args[4].parse().expect("userid 须为数字");
+    if args.get(1).map(String::as_str) == Some("--connect") {
+        // 联调/CI 入口：参数非法时给干净用法提示 + 退出码 2，不 panic
+        let bad_args = || -> ! {
+            eprintln!("FAIL: 用法: mini-client --connect <ip> <port> <userid>（端口为数字，userid 为正整数）");
+            std::process::exit(2);
+        };
+        if args.len() != 5 {
+            bad_args();
+        }
+        let port: u16 = args[3].parse().unwrap_or_else(|_| bad_args());
+        let userid: i64 = args[4].parse().ok().filter(|v| *v > 0).unwrap_or_else(|| bad_args());
         let r = run_connect(&args[2], port, userid, &std::sync::mpsc::channel().0);
         match r {
             Ok(msg) => { println!("OK: {msg}"); std::process::exit(0); }
@@ -272,7 +280,13 @@ fn connect_inner(
     let runtime_dir = exe_sibling("runtime");
 
     // ① 先拉游戏 manifest（分发端口 = 连接端口 + 80）：依赖库清单在载荷同步里要用
-    let dist_port = port + DIST_PORT_OFFSET;
+    // checked_add 防 u16 溢出（port > 65455 时 debug panic / release 静默回绕）
+    let dist_port = port.checked_add(DIST_PORT_OFFSET).ok_or_else(|| {
+        anyhow!(
+            "端口 {port} 过大：分发口 = 端口 + 80 超出上限，请使用 ≤ {} 的端口",
+            u16::MAX - DIST_PORT_OFFSET
+        )
+    })?;
     let base = format!("http://{ip}:{dist_port}");
     send(None, format!("拉取游戏清单: {base}/manifest"));
     // LAN 直连禁用系统/环境代理（否则本机 HTTP_PROXY 会把局域网请求拐走）
@@ -330,12 +344,18 @@ fn connect_inner(
     }
 
     // ③ 增量比对本地缓存 exe 旁 cache/<project>/（size + xxh64 双判）
-    let staging_dir = exe_sibling("cache").join(&manifest.project);
+    // project 同为网络可控字段，与 files[].path 一样走 safe_join 防 .. /绝对路径穿越
+    let staging_dir = safe_join(&exe_sibling("cache"), &manifest.project)?;
     let mut download_list: Vec<&ManifestFile> = Vec::new();
     for f in &manifest.files {
         if !cache_file_matches(&staging_dir, f) {
             download_list.push(f);
         }
+    }
+    // 清单缺哈希的文件无法做内容比对，明示数量（服务端契约必带 hash，正常为 0）
+    let no_hash_n = download_list.iter().filter(|f| f.hash_u64().is_none()).count();
+    if no_hash_n > 0 {
+        send(None, format!("注意：{no_hash_n} 个文件清单缺哈希，仅按 size 校验，已强制重下"));
     }
     if download_list.is_empty() {
         send(Some(1.0), "本地缓存已是最新，无需下载".into());
@@ -441,7 +461,7 @@ fn libs_placed(runtime_dir: &Path, libs: &[String]) -> bool {
 struct ManifestFile {
     path: String,
     size: u64,
-    /// xxh64 内容哈希（兼容数字/十进制串/十六进制串三种形态）
+    /// xxh64 内容哈希（服务端恒产 {:016x} 十六进制串，见 core/distrib.rs；兼容数字形态）
     hash: serde_json::Value,
 }
 
@@ -449,9 +469,9 @@ impl ManifestFile {
     fn hash_u64(&self) -> Option<u64> {
         match &self.hash {
             serde_json::Value::Number(n) => n.as_u64(),
-            serde_json::Value::String(s) => u64::from_str_radix(s, 16)
-                .ok()
-                .or_else(|| s.parse::<u64>().ok()),
+            // 字符串只按十六进制解析：服务端固定产出 {:016x}（可能是纯数字串），
+            // 若再回退十进制解析，纯数字十六进制串反而被误读，缓存比对失真
+            serde_json::Value::String(s) => u64::from_str_radix(s, 16).ok(),
             _ => None,
         }
     }
@@ -475,6 +495,27 @@ fn download_one(
     let bytes = resp
         .bytes()
         .map_err(|e| anyhow!("读取失败 {}: {e}", f.path))?;
+    // 落盘前复核 size + xxh64：HTTP 200 也可能拿到坏内容（劫持页/截断等），
+    // 不符即返回 Err 走外层 3 次重试，且绝不写缓存污染本局
+    if bytes.len() as u64 != f.size {
+        return Err(anyhow!(
+            "下载内容校验失败 {}: 大小不符（清单 {} 字节，实收 {} 字节）",
+            f.path,
+            f.size,
+            bytes.len()
+        ));
+    }
+    if let Some(h) = f.hash_u64() {
+        let actual = xxhash_rust::xxh64::xxh64(&bytes, 0);
+        if actual != h {
+            return Err(anyhow!(
+                "下载内容校验失败 {}: 哈希不符（清单 {:016x}，实收 {:016x}）",
+                f.path,
+                h,
+                actual
+            ));
+        }
+    }
     let dest = safe_join(staging_dir, &f.path)?;
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
@@ -496,7 +537,9 @@ fn cache_file_matches(staging_dir: &Path, f: &ManifestFile) -> bool {
     }
     match f.hash_u64() {
         Some(h) => xxhash_rust::xxh64::xxh64(&data, 0) == h,
-        None => true, // 清单未带哈希时按 size 判定
+        // 清单未带哈希视为不命中直接重下：仅 size 判定会漏掉同尺寸内容变更
+        //（服务端契约必带 hash，此分支属异常形态防御）
+        None => false,
     }
 }
 

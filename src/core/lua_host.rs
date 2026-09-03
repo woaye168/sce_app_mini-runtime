@@ -281,11 +281,22 @@ impl LuaBrain {
         };
         // 入玩家表
         {
-            let key = self.lua.create_registry_value(player.clone()).unwrap();
-            self.inner
+            let key = match self.lua.create_registry_value(player.clone()) {
+                Ok(k) => k,
+                Err(e) => {
+                    self.log_line("error", &format!("登记玩家对象失败: {e}"));
+                    return;
+                }
+            };
+            let old = self
+                .inner
                 .borrow_mut()
                 .players
                 .insert(uid, (nick.to_string(), key));
+            // 重连时释放被覆盖的旧 RegistryKey（drop 不会移除 registry 值，防垃圾线性累积）
+            if let Some((_, old_key)) = old {
+                let _ = self.lua.remove_registry_value(old_key);
+            }
         }
         self.fire_event(
             "玩家-连入",
@@ -609,6 +620,9 @@ impl LuaBrain {
             )?;
         }
 
+        // 定时器时长上限（约 31 年）：超大值时 from_secs_f64 / Instant 加法溢出 panic，
+        // 钳到上限对齐官方"挂一个永远不触发的定时器"语义
+        const MAX_TIMER_SECS: f64 = 1e9;
         // 调度器：next(fn) / wait(sec, fn) / timer_wait(fn, sec) / timer_loop(fn, sec)
         {
             let inner = Rc::clone(&self.inner);
@@ -633,7 +647,7 @@ impl LuaBrain {
                 self.lua.create_function(move |lua, (ms, f): (f64, Function)| {
                     let key = lua.create_registry_value(f)?;
                     inner.borrow_mut().tasks.push(Task {
-                        due: Instant::now() + Duration::from_secs_f64((ms / 1000.0).max(0.0)),
+                        due: Instant::now() + Duration::from_secs_f64((ms / 1000.0).max(0.0).min(MAX_TIMER_SECS)),
                         interval: None,
                         key,
                     });
@@ -649,7 +663,7 @@ impl LuaBrain {
                 self.lua.create_function(move |lua, (secs, f): (f64, Function)| {
                     let key = lua.create_registry_value(f)?;
                     inner.borrow_mut().tasks.push(Task {
-                        due: Instant::now() + Duration::from_secs_f64(secs.max(0.0)),
+                        due: Instant::now() + Duration::from_secs_f64(secs.max(0.0).min(MAX_TIMER_SECS)),
                         interval: None,
                         key,
                     });
@@ -663,10 +677,11 @@ impl LuaBrain {
                 "timer_loop",
                 // base_lua_plus 秒级封装：timer_loop(time秒, func)
                 self.lua.create_function(move |lua, (secs, f): (f64, Function)| {
+                    let secs = secs.max(0.01).min(MAX_TIMER_SECS);
                     let key = lua.create_registry_value(f)?;
                     inner.borrow_mut().tasks.push(Task {
-                        due: Instant::now() + Duration::from_secs_f64(secs.max(0.01)),
-                        interval: Some(Duration::from_secs_f64(secs.max(0.01))),
+                        due: Instant::now() + Duration::from_secs_f64(secs),
+                        interval: Some(Duration::from_secs_f64(secs)),
                         key,
                     });
                     Ok(())
@@ -922,17 +937,17 @@ impl LuaBrain {
         let require = self
             .lua
             .create_function(move |lua, name: String| {
-                // 缓存
+                // 缓存：任意非 nil 值都视为已加载（对齐官方 require——返回 Function/标量也缓存）
                 let loaded: Table = lua.globals().get("__loaded")?;
-                if let Value::Table(t) = loaded.get(name.as_str())? {
-                    return Ok(Value::Table(t));
-                }
-                if let Value::Boolean(true) = loaded.get(name.as_str())? {
-                    return Ok(Value::Boolean(true));
+                let cached: Value = loaded.get(name.as_str())?;
+                if !matches!(cached, Value::Nil) {
+                    return Ok(cached);
                 }
                 let v = load_module(lua, &script_root, &payload_m, &lua_plus_root, &libs, &name)?;
-                loaded.set(name.as_str(), v.clone())?;
-                Ok(v)
+                // 官方语义：模块返回 nil 时缓存 true（避免 loaded.set nil 删键导致重复执行副作用）
+                let stored = if matches!(v, Value::Nil) { Value::Boolean(true) } else { v };
+                loaded.set(name.as_str(), stored.clone())?;
+                Ok(stored)
             })
             .unwrap();
         g.set("require", require).unwrap();
@@ -1166,7 +1181,13 @@ fn rand_range(a: i64, b: i64) -> i64 {
     if b <= a {
         return a;
     }
-    a + (x % ((b - a + 1) as u64)) as i64
+    // 宽度在 u64 回绕域计算：i64 全域 [mininteger, maxinteger] 时 b-a+1 在 i64 域溢出/回绕成 0（%0 panic）
+    let width = (b as u64).wrapping_sub(a as u64).wrapping_add(1);
+    if width == 0 {
+        // 宽度 2^64 即全区间：直接取随机位
+        return x as i64;
+    }
+    a.wrapping_add((x % width) as i64)
 }
 
 /// require_folder：目录名（"scene"）或点分包路径（'bgd_game_server.common.const'）→ 目录下全部 .lua 逐个 require

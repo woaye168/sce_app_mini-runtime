@@ -4,6 +4,7 @@
 use crate::core::auth::UserInfo;
 use anyhow::{anyhow, Result};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// 各环境 client_id（client_base base/client_id.lua 实证）
@@ -76,10 +77,14 @@ pub fn request_device_code(env_domain: &str) -> Result<DeviceGrant> {
 }
 
 /// 第二步：轮询授权结果（阻塞，UI 应放线程里跑）
-pub fn poll_device_token(env_domain: &str, grant: &DeviceGrant, on_state: impl Fn(LoginState)) -> LoginState {
+/// cancel 置位后下一轮即退出（取消登录用，防轮询线程泄漏到二维码自然过期）
+pub fn poll_device_token(env_domain: &str, grant: &DeviceGrant, on_state: impl Fn(LoginState), cancel: Option<&AtomicBool>) -> LoginState {
     let deadline = Instant::now() + Duration::from_secs(grant.expires_in);
     let client = http();
     loop {
+        if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
+            return LoginState::Failed("已取消".to_string());
+        }
         if Instant::now() >= deadline {
             return LoginState::Expired;
         }
@@ -123,7 +128,13 @@ pub fn poll_device_token(env_domain: &str, grant: &DeviceGrant, on_state: impl F
                 on_state(LoginState::Denied);
                 return LoginState::Denied;
             }
-            other => LoginState::Failed(format!("未知状态: {other}")),
+            other => {
+                // 未知错误（expired_token/slow_down/未来新增错误码）：立即返回真实原因，
+                // 不再继续轮询到超时把失败掩盖成 Expired（slow_down 继续原间隔轮询还会加重限流）
+                let st = LoginState::Failed(format!("未知状态: {other}"));
+                on_state(st.clone());
+                return st;
+            }
         };
         on_state(st);
     }

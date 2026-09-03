@@ -25,11 +25,18 @@ pub struct ControlState {
     pub game: Option<GameInfo>,
     /// 收到 0xF01B / 连接断开 → 停局信号
     pub teardown: bool,
-    /// 待推送到编辑器控制台的日志行（0xF00C 通道）
+    /// 待推送到编辑器控制台的日志行（0xF00C 通道；容量封顶 PENDING_LOGS_MAX，溢出丢最旧）
     pub pending_logs: Vec<LogEntry>,
+    /// 积压超限累计丢弃条数（随下一条入队日志以一条提示带出后清零）
+    pub logs_dropped: u64,
+    /// 在线控制连接数（引用计数：编辑器 + CLI 多连接并存时互不踩踏，editor_online 由它派生）
+    pub editor_conns: u32,
     /// 当前控制连接是否在线（日志推送目标存在性）
     pub editor_online: bool,
 }
+
+/// pending_logs 容量上限（编辑器不在线时防内存只增不减）
+const PENDING_LOGS_MAX: usize = 2000;
 
 #[derive(Clone)]
 pub struct GameInfo {
@@ -55,6 +62,8 @@ pub fn new_state() -> ControlRef {
         game: None,
         teardown: false,
         pending_logs: Vec::new(),
+        logs_dropped: 0,
+        editor_conns: 0,
         editor_online: false,
     }))
 }
@@ -66,7 +75,24 @@ pub fn push_log(state: &ControlRef, text: &str) {
 
 /// 带位置/帧号的日志（lua 侧日志走这里）
 pub fn push_log_ex(state: &ControlRef, pos: &str, frame: u64, text: &str) {
-    state.lock().unwrap().pending_logs.push(LogEntry {
+    let mut g = state.lock().unwrap();
+    // 容量封顶（参考 pending_broadcast 的丢最旧策略）：编辑器未接入/断开时唯一消费点停摆，
+    // 无上限 push 会无限涨内存
+    if g.pending_logs.len() >= PENDING_LOGS_MAX {
+        g.pending_logs.remove(0);
+        g.logs_dropped += 1;
+    }
+    // 丢弃计数随下一条入队日志带出一条提示（避免静默丢日志）
+    if g.logs_dropped > 0 {
+        let n = g.logs_dropped;
+        g.logs_dropped = 0;
+        g.pending_logs.push(LogEntry {
+            pos: "shell-host".into(),
+            frame,
+            text: format!("[host] 日志积压超限，已丢弃 {n} 条"),
+        });
+    }
+    g.pending_logs.push(LogEntry {
         pos: pos.to_string(),
         frame,
         text: text.to_string(),
@@ -138,10 +164,17 @@ fn write_upload(ux: &mut UploadCtx, path: &str, content: &[u8]) -> Result<()> {
     let rel = path
         .strip_prefix(&format!("{}/", ux.project))
         .unwrap_or(path);
-    if rel.contains("..") {
+    // 逐分量校验（同 distrib::resolve_file 思路）：拒绝 .. / 盘符 / 根（绝对路径）等一切非常规分量——
+    // 仅挡 ".." 不够，Windows 下 join 遇绝对路径参数会丢弃基目录直接逃逸 upload_root
+    let rel_path = std::path::Path::new(rel);
+    if rel.is_empty()
+        || !rel_path
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
+    {
         return Err(anyhow!("上传路径穿越: {path}"));
     }
-    let abs = ux.dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
+    let abs = ux.dir.join(rel_path);
     if let Some(p) = abs.parent() {
         std::fs::create_dir_all(p)?;
     }
@@ -154,8 +187,9 @@ fn write_upload(ux: &mut UploadCtx, path: &str, content: &[u8]) -> Result<()> {
 /// 真正的省时在客户端侧（只传变化文件）。本函数保留 mtime 快判通道：
 /// 目标 mtime ≥ start = 本轮重复上传（编辑器可能重发），直接跳过。
 fn maybe_skip_upload(ux: &UploadCtx, path: &str) -> bool {
+    // 与 write_upload 同款小写前缀 strip（两侧必须一致）
     let rel = path
-        .strip_prefix(&format!("{}/", ux.project))
+        .strip_prefix(&format!("{}/", ux.project.to_lowercase()))
         .unwrap_or(path);
     let abs = ux.dir.join(rel.replace('/', std::path::MAIN_SEPARATOR_STR));
     std::fs::metadata(&abs)
@@ -180,17 +214,20 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
     host::put_field_varint(&mut body, 1, 0);
     host::put_field_varint(&mut body, 2, 0);
     send(&mut s, host::MSG_EDITOR_LOGIN_RESULT, &body)?;
-    state.lock().unwrap().editor_online = true;
+    {
+        let mut g = state.lock().unwrap();
+        g.editor_conns += 1;
+        g.editor_online = true;
+    }
 
     let mut upload: Option<UploadCtx> = None;
     let mut project = String::new();
     loop {
-        // 先把积压日志推出去
-        {
-            let mut g = state.lock().unwrap();
-            for entry in g.pending_logs.drain(..) {
-                send_editor_log(&mut s, &project, &entry);
-            }
+        // 先把积压日志推出去（锁内仅 drain 取数据、立即释放锁，锁外再做阻塞 socket 写——
+        // 编辑器停止读取时 write_all 可无限阻塞，持锁写会冻结整个 game_host 会话面）
+        let logs: Vec<LogEntry> = state.lock().unwrap().pending_logs.drain(..).collect();
+        for entry in &logs {
+            send_editor_log(&mut s, &project, entry);
         }
         let frame = match read_frame(&mut s)? {
             Some(f) => f,
@@ -227,13 +264,12 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                             2 => {
                                 let Ok(len) = host::get_varint(&parsed.body, &mut pos) else { break };
                                 let len = len as usize;
-                                if pos + len > parsed.body.len() {
-                                    break;
-                                }
+                                // checked_add 防 pos+len 溢出回绕绕过边界检查（len 攻击者可控至 u64::MAX）
+                                let Some(end) = pos.checked_add(len).filter(|&e| e <= parsed.body.len()) else { break };
                                 if field == 3 && len > 0 {
-                                    found = Some(parsed.body[pos..pos + len].to_vec());
+                                    found = Some(parsed.body[pos..end].to_vec());
                                 }
-                                pos += len;
+                                pos = end;
                             }
                             5 => pos += 4,
                             1 => pos += 8,
@@ -277,16 +313,15 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
                             2 => {
                                 let Ok(len) = host::get_varint(&parsed.body, &mut pos) else { break };
                                 let len = len as usize;
-                                if pos + len > parsed.body.len() {
-                                    break;
-                                }
+                                // checked_add 防 pos+len 溢出回绕绕过边界检查（同上）
+                                let Some(end) = pos.checked_add(len).filter(|&e| e <= parsed.body.len()) else { break };
                                 if field == 2 {
                                     ux.pending
                                         .entry(path.clone())
                                         .or_default()
-                                        .extend_from_slice(&parsed.body[pos..pos + len]);
+                                        .extend_from_slice(&parsed.body[pos..end]);
                                 }
-                                pos += len;
+                                pos = end;
                             }
                             5 => pos += 4,
                             1 => pos += 8,
@@ -353,18 +388,33 @@ fn handle_conn(mut s: TcpStream, state: ControlRef, upload_root: PathBuf) -> Res
             }
         }
     }
-    state.lock().unwrap().editor_online = false;
-    // 控制连接断开 = 编辑器/CLI 离开，按 0xF01B 同等停局（会话面由 game_host 自行保活到客户端断开）
+    {
+        let mut g = state.lock().unwrap();
+        // 引用计数：多控制连接并存时，一条断开不清零仍在连接的另一条
+        g.editor_conns = g.editor_conns.saturating_sub(1);
+        g.editor_online = g.editor_conns > 0;
+        // 控制连接断开 = 编辑器/CLI 离开，按 0xF01B 同等停局（会话面由 game_host 自行保活到客户端断开）
+        if g.game.is_some() {
+            g.game = None;
+            g.teardown = true;
+        }
+    }
     Ok(())
 }
 
-/// 控制面监听线程体（game_host::run 拉起）
-/// stop 置位后退出（非阻塞 accept 轮询；game_host 停止/重启用）
+/// 控制面监听 socket 预绑定（game_host 在报 ready 前调用：bind 失败即启动失败，不误报就绪）
 /// bind_addr：127.0.0.1 = 仅本机；0.0.0.0 = 局域网/外网（远端客户端连控制面入局）
-pub fn run(port: u16, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sync::atomic::AtomicBool>, bind_addr: &str) -> Result<()> {
+pub fn bind_listener(port: u16, bind_addr: &str) -> Result<TcpListener> {
     let addr = format!("{bind_addr}:{port}");
     let listener = TcpListener::bind(&addr).map_err(|e| anyhow!("控制面监听失败 {addr}: {e}"))?;
     listener.set_nonblocking(true)?;
+    Ok(listener)
+}
+
+/// 控制面监听线程体（game_host::run 拉起；listener 由 bind_listener 预绑定）
+/// stop 置位后退出（非阻塞 accept 轮询；game_host 停止/重启用）
+pub fn run(listener: TcpListener, state: ControlRef, upload_root: PathBuf, stop: Arc<std::sync::atomic::AtomicBool>) -> Result<()> {
+    let addr = listener.local_addr().map(|a| a.to_string()).unwrap_or_else(|_| "?".into());
     crate::srv_log!("[host-ctl] 控制面已监听 {addr}");
     let _ = std::fs::create_dir_all(&upload_root);
     while !stop.load(std::sync::atomic::Ordering::Relaxed) {

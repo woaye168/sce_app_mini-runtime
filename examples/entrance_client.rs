@@ -332,7 +332,7 @@ async fn main() {
     // 登录 f4 flags（默认 0x1000040 = editor lobby 观测值；tester isGameFlag:true 的 flags 待对照，可用此变量实验）
     let login_f4: u64 = std::env::var("ENT_F4").ok().and_then(|s| u64::from_str_radix(s.trim_start_matches("0x"), 16).ok()).unwrap_or(0x1000040);
     // 登录帧追加字段（hex，如 '1801'=f3 varint 1、'2801'=f5 varint 1；isGameFlag 字段定位实验用）
-    let login_extra: Vec<u8> = std::env::var("ENT_LOGIN_EXTRA").ok().and_then(|s| (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()).unwrap_or_default();
+    let login_extra: Vec<u8> = std::env::var("ENT_LOGIN_EXTRA").ok().and_then(|s| (0..s.len().saturating_sub(1)).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok()).collect()).unwrap_or_default();
 
     let cred: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&cred_path).expect("读凭证失败")).expect("凭证 json 解析失败");

@@ -123,9 +123,12 @@ if (ws) {
   Interceptor.attach(ws.findExportByName('WSARecv'), {
     onEnter(a){ this.s = a[0].toInt32(); this.d = dumpWSABuf(a[1]); this.cnt = a[3]; },
     onLeave(rv){
+      // SOCKET_ERROR（含 overlapped 未完成）时计数指针不可靠，整条丢弃；
+      // 计数读取失败也不再回退用缓冲全长（避免把未接收的垃圾当收包 dump）
+      if (rv.toInt32() !== 0) return;
       if (this.d) {
-        let n = this.d.n;
-        try { const got = this.cnt.readU32(); if (got > 0 && got < n) n = got; } catch(e){}
+        let n;
+        try { const got = this.cnt.readU32(); if (got <= 0) return; n = Math.min(got, this.d.n); } catch(e){ return; }
         send({t:'WSARecv', sock:this.s, addr:resolveAddr(this.s), len:n, data:hexbuf(this.d.p,Math.min(n,MAXDUMP)), txt:printable(this.d.p,Math.min(n,MAXDUMP))});
       }
     }

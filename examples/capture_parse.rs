@@ -143,7 +143,7 @@ fn load(path: &str, host_prefix: &str) -> (Vec<Rec>, Vec<String>) {
             data: v["data"]
                 .as_str()
                 .filter(|s| !s.is_empty() && !s.starts_with('<'))
-                .and_then(|s| (0..s.len())
+                .and_then(|s| (0..s.len().saturating_sub(1)) // 奇数长度防切片越界
                     .step_by(2)
                     .map(|i| u8::from_str_radix(&s[i..i + 2], 16))
                     .collect::<Result<Vec<u8>, _>>()

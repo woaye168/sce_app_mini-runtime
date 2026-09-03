@@ -82,7 +82,17 @@ impl RuntimeKind {
 pub fn detect_client_exe(runtime_dir: &Path) -> Option<(RuntimeKind, PathBuf)> {
     let scegame = runtime_dir.join("scegame.exe");
     if scegame.is_file() {
-        return Some((RuntimeKind::TesterTest, scegame));
+        // scegame.exe 本身不区分测试/正式环境，按载荷目录 Update/<env> 的环境证据区分；
+        // 无证据时保持原默认 TesterTest（调用方据 kind 取 env_domain 的局限见此）
+        let upd = runtime_dir.join("Update");
+        let kind = if upd.join(RuntimeKind::TesterTest.env_domain()).is_dir() {
+            RuntimeKind::TesterTest
+        } else if upd.join(RuntimeKind::TesterProd.env_domain()).is_dir() {
+            RuntimeKind::TesterProd
+        } else {
+            RuntimeKind::TesterTest
+        };
+        return Some((kind, scegame));
     }
     let mut best: Option<(u32, PathBuf)> = None;
     for e in std::fs::read_dir(runtime_dir).ok()?.flatten() {

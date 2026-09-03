@@ -85,29 +85,57 @@ impl crate::App {
             } else {
                 ui.label("host：未运行");
             }
-            if !host_running && ui.button("启动 host").clicked() {
-                start_host(self);
-            }
-            if host_running && ui.button("重启 host").clicked() {
-                sce_app_mini_runtime::core::game_host::stop_running();
-                stop_all_clients(self);
-                let params = host_params(self);
-                std::thread::spawn(move || {
-                    // 等旧实例退出（主循环 5ms 一拍 + 控制面 100ms 一轮）
-                    for _ in 0..50 {
-                        if sce_app_mini_runtime::core::game_host::control_state().is_none() {
-                            break;
+            // 启动/重启在途（ls_host_rx 未回收）时禁用生命周期按钮：
+            // 串行化杜绝「重启等待期再点停止，停止信号被 run() 重置吞掉」的竞态
+            let host_busy = self.ls_host_rx.is_some();
+            ui.add_enabled_ui(!host_busy, |ui| {
+                if !host_running && ui.button("启动 host").clicked() {
+                    start_host(self);
+                }
+                if host_running && ui.button("重启 host").clicked() {
+                    sce_app_mini_runtime::core::game_host::stop_running();
+                    stop_all_clients(self);
+                    let params = host_params(self);
+                    let (tx, rx) = std::sync::mpsc::channel::<Result<u16, String>>();
+                    std::thread::spawn(move || {
+                        // 等旧实例退出（主循环 5ms 一拍 + 控制面 100ms 一轮）
+                        let mut gone = false;
+                        for _ in 0..50 {
+                            if sce_app_mini_runtime::core::game_host::control_state().is_none() {
+                                gone = true;
+                                break;
+                            }
+                            std::thread::sleep(std::time::Duration::from_millis(100));
                         }
-                        std::thread::sleep(std::time::Duration::from_millis(100));
-                    }
-                    let _ = sce_app_mini_runtime::core::game_host::ensure_running(params);
-                });
-            }
-            if host_running && ui.button("停止 host").clicked() {
-                sce_app_mini_runtime::core::game_host::stop_running();
-                stop_all_clients(self);
-            }
+                        // 等待超时 = 旧实例未清场：回报失败而不是硬上 ensure_running
+                        // （RUNNING 仍占着会直接返回旧端口空转，用户误以为已重启）
+                        let r = if gone {
+                            sce_app_mini_runtime::core::game_host::ensure_running(params)
+                                .map_err(|e| e.to_string())
+                        } else {
+                            Err("旧 host 实例 5 秒内未退出，重启失败（可先「停止 host」再「启动 host」）".to_string())
+                        };
+                        let _ = tx.send(r);
+                    });
+                    self.ls_host_rx = Some(rx);
+                    self.status = "host 重启中...".into();
+                }
+                if host_running && ui.button("停止 host").clicked() {
+                    sce_app_mini_runtime::core::game_host::stop_running();
+                    stop_all_clients(self);
+                }
+            });
         });
+        // 收 host 启动/重启结果（工作线程经 channel 回送；失败写状态栏，不再停在「启动中...」）
+        if let Some(rx) = &self.ls_host_rx {
+            if let Ok(r) = rx.try_recv() {
+                self.status = match r {
+                    Ok(port) => format!("host 已启动（端口 {port}）"),
+                    Err(e) => format!("host 启动失败：{e}"),
+                };
+                self.ls_host_rx = None;
+            }
+        }
         // 非本地模式：显示分享地址 + 外网提示
         if self.ls_bind_mode != 0 {
             let ip = lan_ip();
@@ -192,6 +220,12 @@ impl crate::App {
             }
         });
         if let Some(id) = remove_id {
+            // 删除运行中账号：先杀其客户端进程并清表项，防孤儿进程 + ls_clients 残留
+            if let Some(pid) = self.ls_clients.remove(&id) {
+                if process_alive(pid) {
+                    kill_pid(pid);
+                }
+            }
             if let Err(e) = sce_app_mini_runtime::core::local_accounts::remove(id) {
                 self.status = format!("删除失败：{e}");
             }
@@ -285,22 +319,21 @@ fn lan_ip() -> String {
         .unwrap_or_else(|_| "?".into())
 }
 
-/// 启动 host（后台线程，防阻塞 UI）
+/// 启动 host（后台线程，防阻塞 UI；结果经 ls_host_rx 回送，失败写状态栏）
 fn start_host(app: &mut crate::App) {
     let params = host_params(app);
+    let (tx, rx) = std::sync::mpsc::channel::<Result<u16, String>>();
     std::thread::spawn(move || {
-        let _ = sce_app_mini_runtime::core::game_host::ensure_running(params);
+        let r = sce_app_mini_runtime::core::game_host::ensure_running(params).map_err(|e| e.to_string());
+        let _ = tx.send(r);
     });
+    app.ls_host_rx = Some(rx);
     app.status = "host 启动中...".into();
 }
 
-/// 进程存活检查（tasklist 查 pid）
+/// 进程存活检查（Win32 零子进程探测，与 core/debug.rs 同款；原 tasklist 子进程每帧卡顿）
 fn process_alive(pid: u32) -> bool {
-    sce_app_mini_runtime::core::silent_command("tasklist")
-        .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-        .output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-        .unwrap_or(false)
+    sce_app_mini_runtime::core::debug::process_exit_code(pid).is_none()
 }
 
 fn kill_pid(pid: u32) {

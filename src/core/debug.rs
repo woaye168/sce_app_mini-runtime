@@ -151,13 +151,34 @@ fn spawn_detached(exe: &Path, args: &[String], cwd: &Path) -> Result<u32> {
     fn wide(s: &std::ffi::OsStr) -> Vec<u16> {
         s.encode_wide().chain(std::iter::once(0)).collect()
     }
-    // 命令行：exe + 引号包裹的参数（含空格/引号的参数加引号）
+    // 命令行：exe + 引号包裹的参数（含空格/引号的参数加引号）。
+    // 转义遵循 CommandLineToArgvW 规则：引号前连续反斜杠 2n+1 个，
+    // 收尾引号前的反斜杠加倍（否则尾反斜杠路径 `\"` 被解析为字面引号，后续参数全部串位）
     fn quote_arg(a: &str) -> String {
-        if a.is_empty() || a.chars().any(|c| c == ' ' || c == '\t' || c == '"') {
-            format!("\"{}\"", a.replace('"', "\\\""))
-        } else {
-            a.to_string()
+        if !a.is_empty() && !a.chars().any(|c| c == ' ' || c == '\t' || c == '"') {
+            return a.to_string();
         }
+        let mut out = String::with_capacity(a.len() + 2);
+        out.push('"');
+        let mut backslashes = 0usize;
+        for c in a.chars() {
+            match c {
+                '\\' => backslashes += 1,
+                '"' => {
+                    out.push_str(&"\\".repeat(backslashes * 2 + 1));
+                    backslashes = 0;
+                    out.push('"');
+                }
+                _ => {
+                    out.push_str(&"\\".repeat(backslashes));
+                    backslashes = 0;
+                    out.push(c);
+                }
+            }
+        }
+        out.push_str(&"\\".repeat(backslashes * 2));
+        out.push('"');
+        out
     }
     let mut cmdline = format!("\"{}\"", exe.display());
     for a in args {
@@ -312,12 +333,17 @@ impl DebugSession {
             }
         };
 
-        // ①.5 凭证注入：写 runtime/User/user_info-<env>.json（客户端 account 模块启动时读取）
+        // ①.5 凭证注入：写 runtime/User/user_info-<env>.json（客户端 account 模块启动时读取）。
+        // 关键：login 字段强制 1（与 login_state.rs 同款）——凭证库收割的 login 是编辑器写盘的
+        // 0/1 状态，若为 0 则 startup/entrance 的 `account.get_login_state() == 1` 闸门不过，
+        // 大厅停在登录按钮永远走不到 GamePlayOnline
+        let mut cred_main = params.cred.clone();
+        cred_main.login = 1;
         let user_info_path = params
             .runtime_dir
             .join("User")
             .join(format!("user_info-{}.json", params.env_domain));
-        crate::core::auth::write_user_info(&user_info_path, &params.cred)?;
+        crate::core::auth::write_user_info(&user_info_path, &cred_main)?;
         log_warn(&format!("凭证已注入: {}", user_info_path.display()));
 
         // ② 控制连接 + 上传
@@ -368,10 +394,18 @@ impl DebugSession {
         log_warn(&format!("客户端已拉起 pid={child_pid}（引擎 {}）", kind.display_name()));
 
         // ④.5 附加客户端（多开）：凭证注入是单文件互斥（user_info-<env>.json），
-        // 串行「写凭证 → 拉起 → 等其读取」逐个来；间隔 6s 实测够客户端启动期读完
+        // 串行「写凭证 → 拉起 → 等其读取」逐个来；间隔 6s 实测够客户端启动期读完。
+        // 主客户端同样要先等读取窗口——否则第一个附加凭证立即覆写 user_info，
+        // 主客户端启动期可能读到附加账号凭证（与自身 -user 不匹配 → 串号）
+        if !params.extra_clients.is_empty() {
+            std::thread::sleep(Duration::from_secs(6));
+        }
         let mut extra_pids = Vec::new();
         for (cred2, userid2) in &params.extra_clients {
-            crate::core::auth::write_user_info(&user_info_path, cred2)?;
+            // 附加凭证同样强制 login=1（同主凭证）
+            let mut cred2 = cred2.clone();
+            cred2.login = 1;
+            crate::core::auth::write_user_info(&user_info_path, &cred2)?;
             let mut args2 = client_args.clone();
             for a in args2.iter_mut() {
                 if a.starts_with("-user=") {
@@ -383,9 +417,9 @@ impl DebugSession {
             extra_pids.push(pid2);
             std::thread::sleep(Duration::from_secs(6));
         }
-        // 恢复主凭证注入（后续重连/下局仍用主号）
+        // 恢复主凭证注入（后续重连/下局仍用主号；保持 login=1 形态）
         if !params.extra_clients.is_empty() {
-            crate::core::auth::write_user_info(&user_info_path, &params.cred)?;
+            crate::core::auth::write_user_info(&user_info_path, &cred_main)?;
         }
 
         // pidfile：<staging>.pid（debug stop 用；多开 = 每行一个 pid）
@@ -459,9 +493,9 @@ impl DebugSession {
     }
 }
 
-/// 查询进程退出码（None = 仍在运行）
+/// 查询进程退出码（None = 仍在运行）；Win32 零子进程探测，UI 层存活检查也复用
 #[cfg(windows)]
-fn process_exit_code(pid: u32) -> Option<i32> {
+pub fn process_exit_code(pid: u32) -> Option<i32> {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
         GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,

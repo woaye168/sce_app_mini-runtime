@@ -69,13 +69,15 @@ function hookSSL(){
 hookSSL();
 
 // ---- ws2_32 connect 对照 ----
-let ws;
-try { ws = Process.getModuleByName('ws2_32.dll'); } catch(e){ setTimeout(arguments.callee, 500); }
-if (ws) {
+// 命名函数重试（顶层无 arguments 对象，arguments.callee 会抛 ReferenceError）
+function hookConnect(){
+  let ws;
+  try { ws = Process.getModuleByName('ws2_32.dll'); } catch(e){ setTimeout(hookConnect, 500); return; }
   Interceptor.attach(ws.findExportByName('connect'), {
     onEnter(a){ const addr=parseSockaddr(a[1]); send({t:'connect', addr:addr}); }
   });
 }
+hookConnect();
 "#;
 
 struct Handler {

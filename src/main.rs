@@ -60,6 +60,21 @@ fn main() -> eframe::Result<()> {
                 cli_local(&args[2..]);
                 return Ok(());
             }
+            "staging" => {
+                attach_parent_console();
+                cli_staging(&args[2..]);
+                return Ok(());
+            }
+            "selftest" => {
+                attach_parent_console();
+                cli_selftest();
+                return Ok(());
+            }
+            "locate" => {
+                attach_parent_console();
+                cli_locate(&args[2..]);
+                return Ok(());
+            }
             _ => {}
         }
     }
@@ -130,9 +145,17 @@ fn cli_auth(args: &[String]) {
             match core::auth::read_user_info(&path) {
                 Ok(info) => {
                     let mut store = core::auth::CredentialStore::load();
-                    store.harvest(label, &locate.env_domain, info);
+                    // 重名自动追加序号（与 UI 导入行为一致，避免静默覆盖已有凭证）
+                    let base = label.trim();
+                    let mut final_label = base.to_string();
+                    let mut n = 2;
+                    while store.items.contains_key(&final_label) {
+                        final_label = format!("{base}-{n}");
+                        n += 1;
+                    }
+                    store.harvest(&final_label, &locate.env_domain, info);
                     match store.save() {
-                        Ok(_) => println!("已导入凭证: {label}（编辑器原凭证未动）"),
+                        Ok(_) => println!("已导入凭证: {final_label}（编辑器原凭证未动）"),
                         Err(e) => eprintln!("保存失败: {e}"),
                     }
                 }
@@ -170,7 +193,7 @@ fn cli_auth(args: &[String]) {
                             core::login::LoginState::WaitingConfirm => println!("已扫码，请在手机上确认..."),
                             _ => {}
                         }
-                    });
+                    }, None);
                     match state {
                         core::login::LoginState::Done(info) => {
                             let path = locate.user_info_file();
@@ -452,17 +475,28 @@ fn cli_debug(args: &[String]) {
                         } else {
                             println!("保持控制连接 {secs}s，收取 host 日志...");
                         }
-                        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(if hold_forever { u64::MAX / 2 } else { secs });
                         let mut shown = 0usize;
-                        while std::time::Instant::now() < deadline {
+                        // 泵消息体：收 session 事件 + 打印新增 host 日志
+                        let mut pump = |shown: &mut usize| {
                             session.poll();
                             if let Some(ctl) = &session.ctl {
-                                while shown < ctl.host_logs.len() {
-                                    println!("[host] {}", ctl.host_logs[shown]);
-                                    shown += 1;
+                                while *shown < ctl.host_logs.len() {
+                                    println!("[host] {}", ctl.host_logs[*shown]);
+                                    *shown += 1;
                                 }
                             }
                             std::thread::sleep(std::time::Duration::from_millis(500));
+                        };
+                        if hold_forever {
+                            // 常驻分支直接永久循环，不用「超大 deadline」表达（Instant+Duration 溢出即 panic，平台相关）
+                            loop {
+                                pump(&mut shown);
+                            }
+                        } else {
+                            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+                            while std::time::Instant::now() < deadline {
+                                pump(&mut shown);
+                            }
                         }
                     }
                     println!("（客户端独立运行，关闭其窗口即结束；debug stop 可远程停止）");
@@ -592,8 +626,22 @@ fn cli_host(args: &[String]) {
                 eprintln!("自建 host 退出: {e}");
             }
         }
+        Some("probe") => {
+            // host probe [--port 5003] [--bind 127.0.0.1]——真本地 host（game_host）控制面协议探针
+            let mut port = 5003u16;
+            let mut bind_addr = "127.0.0.1".to_string();
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--port" => { port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(port); i += 2; }
+                    "--bind" => { bind_addr = args.get(i + 1).cloned().unwrap_or(bind_addr); i += 2; }
+                    other => { eprintln!("未知参数: {other}"); return; }
+                }
+            }
+            cli_host_probe(port, &bind_addr);
+        }
         _ => {
-            eprintln!("host 子命令: start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>]");
+            eprintln!("host 子命令: start --project <路径> [--port 5003] [--env <域>] [--cred <凭证名>] [--capture <jsonl路径>] | probe [--port 5003] [--bind 127.0.0.1]");
         }
     }
 }
@@ -681,6 +729,458 @@ fn cli_payload(args: &[String]) {
     }
 }
 
+/// 递归统计目录下文件数（staging 结果报告用）
+fn count_files(dir: &std::path::Path) -> u32 {
+    let mut n = 0u32;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                n += count_files(&p);
+            } else {
+                n += 1;
+            }
+        }
+    }
+    n
+}
+
+/// staging create --project <路径> [--staging <目录>] [--runtime <载荷目录>]
+/// 独立触发 staging 生成（core::staging::create 同款逻辑；警告/增量明细经 logbus 直接打印）
+fn cli_staging(args: &[String]) {
+    match args.first().map(|s| s.as_str()) {
+        Some("create") => {
+            let mut project = None;
+            let mut staging = None;
+            let mut runtime = None;
+            let mut i = 1;
+            while i < args.len() {
+                match args[i].as_str() {
+                    "--project" => { project = args.get(i + 1).cloned(); i += 2; }
+                    "--staging" => { staging = args.get(i + 1).cloned(); i += 2; }
+                    "--runtime" => { runtime = args.get(i + 1).cloned(); i += 2; }
+                    other => { eprintln!("未知参数: {other}"); return; }
+                }
+            }
+            let Some(project) = project else {
+                eprintln!("用法: staging create --project <路径> [--staging <目录>] [--runtime <载荷目录>]");
+                return;
+            };
+            let project_root = PathBuf::from(&project);
+            // 项目名取 map_settings.json 的 ProjectName（与 debug 编排一致）
+            let (project_name, _) = match core::debug::read_map_settings(&project_root) {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("读项目失败: {e}");
+                    std::process::exit(1);
+                }
+            };
+            let result = match staging {
+                // 显式指定目录：直生成（create_at 不含布局推导）
+                Some(dir) => core::staging::create_at(&project_root, std::path::Path::new(&dir), &project_name),
+                // 缺省推导与 debug 模块一致：<runtime>/User/debug/<项目目录名>（runtime 缺省 = exe 旁 runtime）
+                None => {
+                    let runtime_dir = runtime.map(PathBuf::from).unwrap_or_else(|| {
+                        std::env::current_exe()
+                            .map(|e| e.with_file_name("runtime"))
+                            .unwrap_or_else(|_| PathBuf::from("runtime"))
+                    });
+                    core::staging::create(&project_root, &runtime_dir, &project_name)
+                }
+            };
+            match result {
+                Ok(dir) => println!("staging 已生成: {}（{} 个文件）", core::disp(&dir), count_files(&dir)),
+                Err(e) => {
+                    eprintln!("staging 生成失败: {e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        _ => eprintln!("staging 子命令: create --project <路径> [--staging <目录>] [--runtime <载荷目录>]"),
+    }
+}
+
+/// selftest：核心算法自检（zcompress / cmsg_pack / from_lua 环检测）。
+/// 全过打印 PASS 明细；任一失败打印 FAIL 并以 exit code 1 退出
+fn cli_selftest() {
+    let mut failed = 0u32;
+    let mut check = |name: &str, r: Result<(), String>| match r {
+        Ok(()) => println!("[PASS] {name}"),
+        Err(e) => {
+            println!("[FAIL] {name}: {e}");
+            failed += 1;
+        }
+    };
+    check("zcompress 压缩/解压 roundtrip", selftest_zcompress());
+    check("cmsg_pack pack/unpack roundtrip", selftest_cmsg_roundtrip());
+    check("cmsg_pack 超深度嵌套拒包（不爆栈）", selftest_cmsg_depth());
+    check("cmsg_pack from_lua 循环引用拒绝（不 abort）", selftest_from_lua_cycle());
+    if failed > 0 {
+        println!("selftest 完成：{failed} 项失败");
+        std::process::exit(1);
+    }
+    println!("selftest 全部通过");
+}
+
+/// zcompress：多组样本 压缩→解压 roundtrip 逐字节一致（单解码器逐帧推进，连接级状态机同款用法）
+fn selftest_zcompress() -> Result<(), String> {
+    use core::zcompress::{decode_frame, encode_frame_raw, ZDecoder};
+    // 伪随机字节（xorshift，免引入 rand 依赖）
+    let mut seed = 0x1234_5678u32;
+    let mut rand_bytes = Vec::with_capacity(4096);
+    for _ in 0..4096 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        rand_bytes.push((seed & 0xff) as u8);
+    }
+    let samples: Vec<(&str, Vec<u8>)> = vec![
+        ("空样本", Vec::new()),
+        ("短样本", b"hello zcompress".to_vec()),
+        ("长重复样本", b"abcabc123".repeat(2000)),
+        ("随机字节样本", rand_bytes),
+        ("全字节值样本", (0..=255u8).collect::<Vec<u8>>().repeat(4)),
+    ];
+    let mut dec = ZDecoder::new();
+    for (name, sample) in &samples {
+        let enc = encode_frame_raw(sample);
+        let back = decode_frame(&mut dec, &enc).map_err(|e| format!("{name} 解码失败: {e}"))?;
+        if back != *sample {
+            return Err(format!("{name} roundtrip 逐字节不一致（{} 字节）", sample.len()));
+        }
+    }
+    Ok(())
+}
+
+/// cmsg_pack：pack→unpack roundtrip（整数/负整数/字符串/二进制/数组/嵌套 map 各形态）
+fn selftest_cmsg_roundtrip() -> Result<(), String> {
+    use core::cmsg_pack::{pack_to_vec, unpack, CVal};
+    let cases: Vec<(&str, CVal)> = vec![
+        ("nil", CVal::Nil),
+        ("bool", CVal::Bool(true)),
+        ("零", CVal::Int(0)),
+        ("正整数 fixint", CVal::Int(127)),
+        ("正整数 u16 宽度", CVal::Int(65536)),
+        ("负整数 fixint", CVal::Int(-1)),
+        ("负整数 i8 宽度", CVal::Int(-128)),
+        ("负整数 i64 宽度", CVal::Int(i64::MIN)),
+        ("u64 最大值", CVal::U64(u64::MAX)),
+        ("f64", CVal::F64(std::f64::consts::PI)),
+        ("字符串（UTF-8）", CVal::Str("你好 cmsg".as_bytes().to_vec())),
+        ("二进制（含 0x00）", CVal::Str(vec![0, 1, 0, 255, 0])),
+        ("数组", CVal::Array(vec![CVal::Int(1), CVal::Int(2), CVal::Str(b"x".to_vec())])),
+        ("嵌套 map", CVal::Map(vec![
+            (CVal::Str(b"type".to_vec()), CVal::Str(b"Req_Test".to_vec())),
+            (CVal::Str(b"args".to_vec()), CVal::Map(vec![
+                (CVal::Str(b"n".to_vec()), CVal::Int(-42)),
+                (CVal::Str(b"list".to_vec()), CVal::Array(vec![CVal::Bool(false), CVal::Nil])),
+            ])),
+        ])),
+    ];
+    for (name, v) in &cases {
+        let bytes = pack_to_vec(v);
+        let Some((back, used)) = unpack(&bytes) else {
+            return Err(format!("{name} unpack 返回 None"));
+        };
+        if used != bytes.len() {
+            return Err(format!("{name} 消费长度不符: {used}/{}", bytes.len()));
+        }
+        if back != *v {
+            return Err(format!("{name} roundtrip 不一致: {back:?}"));
+        }
+    }
+    Ok(())
+}
+
+/// cmsg_pack 深度上限：超深度嵌套样本 unpack 必须拒绝（返回 None）而非栈溢出
+fn selftest_cmsg_depth() -> Result<(), String> {
+    use core::cmsg_pack::{pack_to_vec, unpack, CVal};
+    // 上限内对照组（64 层 < MAX_DEPTH 128）：必须正常 roundtrip
+    let mut ok = CVal::Int(1);
+    for _ in 0..64 {
+        ok = CVal::Array(vec![ok]);
+    }
+    let bytes = pack_to_vec(&ok);
+    if unpack(&bytes).is_none() {
+        return Err("64 层嵌套（上限内）被误拒".into());
+    }
+    // 超深度（200 层 > MAX_DEPTH 128）：必须拒包
+    let mut deep = CVal::Int(1);
+    for _ in 0..200 {
+        deep = CVal::Array(vec![deep]);
+    }
+    let bytes = pack_to_vec(&deep);
+    if unpack(&bytes).is_some() {
+        return Err("200 层超深度嵌套未被拒绝".into());
+    }
+    Ok(())
+}
+
+/// from_lua 环检测：mlua 造自引用表（t.self = t），from_lua 必须返回 Err 而非递归爆栈 abort
+fn selftest_from_lua_cycle() -> Result<(), String> {
+    let lua = mlua::Lua::new();
+    let t: mlua::Table = lua
+        .load("local t = {} t.self = t return t")
+        .eval()
+        .map_err(|e| format!("构造自引用表失败: {e}"))?;
+    match core::cmsg_pack::from_lua(&mlua::Value::Table(t)) {
+        Err(_) => Ok(()),
+        Ok(_) => Err("自引用表未被拒绝（环检测失效）".into()),
+    }
+}
+
+/// locate <项目路径>——编辑器定位推导结果打印（core::locate::locate）
+fn cli_locate(args: &[String]) {
+    let Some(project) = args.first() else {
+        eprintln!("用法: locate <项目路径>");
+        return;
+    };
+    match core::locate::locate(std::path::Path::new(project)) {
+        Ok(l) => {
+            println!("api_version : {}", l.api_version);
+            println!("env_domain  : {}", l.env_domain);
+            println!("editor_root : {}", core::disp(&l.editor_root));
+            println!("engine_root : {}", core::disp(&l.engine_root));
+            println!("version_dir : {}", core::disp(&l.version_dir()));
+            println!("user_info   : {}", core::disp(&l.user_info_file()));
+            println!("editor_exe  : {}", core::disp(&l.editor_exe()));
+        }
+        Err(e) => {
+            eprintln!("定位失败: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// ---------- host probe：真本地 host 控制面协议探针 ----------
+
+/// 探针读一帧（u32 LE 总长 + 帧体，与 host_server::read_frame 同款线格式）；EOF/对端关闭 = Ok(None)
+fn probe_read_frame(s: &mut std::net::TcpStream) -> Result<Option<core::host::Frame>, String> {
+    use std::io::Read;
+    let mut len_buf = [0u8; 4];
+    match s.read_exact(&mut len_buf) {
+        Ok(()) => {}
+        Err(e)
+            if e.kind() == std::io::ErrorKind::UnexpectedEof
+                || e.kind() == std::io::ErrorKind::ConnectionReset =>
+        {
+            return Ok(None)
+        }
+        // 读超时单列（连接仍存活语义的判定依赖它，不能与 RST 混淆）
+        Err(e)
+            if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            return Err("读超时".into())
+        }
+        Err(e) => return Err(format!("读帧头失败: {e}")),
+    }
+    let total = u32::from_le_bytes(len_buf) as usize;
+    if !(6..=64 * 1024 * 1024).contains(&total) {
+        return Err(format!("帧长度异常: {total}"));
+    }
+    let mut frame = len_buf.to_vec();
+    frame.resize(total, 0);
+    match s.read_exact(&mut frame[4..]) {
+        Ok(()) => {}
+        Err(e)
+            if e.kind() == std::io::ErrorKind::WouldBlock
+                || e.kind() == std::io::ErrorKind::TimedOut =>
+        {
+            return Err("读超时".into())
+        }
+        Err(e) => return Err(format!("读帧体失败: {e}")),
+    }
+    let parsed = core::host::decode_frame(&frame).map_err(|e| format!("解帧失败: {e}"))?;
+    Ok(Some(parsed))
+}
+
+/// 等指定类型的帧（跳过 0xF00C 日志推送等其余类型；读超时即失败）
+fn probe_wait(s: &mut std::net::TcpStream, want_type: u64) -> Result<core::host::Frame, String> {
+    loop {
+        match probe_read_frame(s)? {
+            Some(f) if f.msg_type == want_type => return Ok(f),
+            Some(_) => continue,
+            None => return Err("连接被关闭".into()),
+        }
+    }
+}
+
+/// 发一帧（core::host::encode_frame 组帧，与 host_server 解析严格对齐）
+fn probe_send(s: &mut std::net::TcpStream, msg_type: u64, body: &[u8]) -> Result<(), String> {
+    use std::io::Write;
+    let frame = core::host::encode_frame(msg_type, body);
+    s.write_all(&frame).map_err(|e| format!("发送失败: {e}"))
+}
+
+/// 连接控制口并发合法 0xF000 登录帧 {f1 userid, f2 token}，校验 0xF001 应答 result=0
+fn probe_login(s: &mut std::net::TcpStream, userid: u64) -> Result<(), String> {
+    let mut body = Vec::new();
+    core::host::put_field_varint(&mut body, 1, userid);
+    core::host::put_field_bytes(&mut body, 2, b"probe");
+    probe_send(s, core::host::MSG_EDITOR_LOGIN, &body)?;
+    let f = probe_wait(s, core::host::MSG_EDITOR_LOGIN_RESULT)?;
+    let result = core::host::body_varint(&f.body, 1).unwrap_or(u64::MAX);
+    if result != 0 {
+        return Err(format!("登录应答 result={result}"));
+    }
+    Ok(())
+}
+
+/// 探针 connect（带读写超时，防探针自身悬挂）
+fn probe_connect(bind_addr: &str, port: u16) -> Result<std::net::TcpStream, String> {
+    let s = std::net::TcpStream::connect(format!("{bind_addr}:{port}"))
+        .map_err(|e| format!("TCP 连接失败 {bind_addr}:{port}: {e}"))?;
+    let t = std::time::Duration::from_secs(3);
+    let _ = s.set_read_timeout(Some(t));
+    let _ = s.set_write_timeout(Some(t));
+    let _ = s.set_nodelay(true);
+    Ok(s)
+}
+
+/// 真本地 host 协议探针（host probe）：
+/// a. 合法 0xF000 登录 → 0xF001 result=0
+/// b. 畸形帧边界拒绝（声明长度远大于实际：envelope 级丢帧保连接 / 外壳级拒帧关连接），host 存活
+/// c. 重连再登录 result=0（critical#1 回归：主循环未被畸形帧杀死）
+/// d. 0xF01B teardown 后连接仍可用（ping/pong）
+/// 任一 FAIL 最终 exit 1
+fn cli_host_probe(port: u16, bind_addr: &str) {
+    const TEST_USERID: u64 = 90000001;
+    let mut failed = 0u32;
+    let mut report = |name: &str, r: Result<(), String>| match r {
+        Ok(()) => println!("[PASS] {name}"),
+        Err(e) => {
+            println!("[FAIL] {name}: {e}");
+            failed += 1;
+        }
+    };
+
+    // 起真本地 host（本进程内嵌线程；探完 stop_running 收尾）
+    let runtime_dir = std::env::current_exe()
+        .map(|e| e.with_file_name("runtime"))
+        .unwrap_or_else(|_| PathBuf::from("runtime"));
+    let ready = core::game_host::ensure_running(core::game_host::GameHostParams {
+        port,
+        runtime_dir,
+        env_domain: "editor-pd.spark.xd.com".into(),
+        bind_addr: bind_addr.to_string(),
+    });
+    let port = match ready {
+        Ok(p) => {
+            println!("host 已就绪: {bind_addr}:{p}");
+            p
+        }
+        Err(e) => {
+            report("host 启动", Err(format!("{e}")));
+            println!("host probe 完成：{failed} 项失败");
+            std::process::exit(1);
+        }
+    };
+
+    // a. 合法登录帧 → result=0（连接留给 b 复用）
+    let conn_a = probe_connect(bind_addr, port).and_then(|mut s| {
+        probe_login(&mut s, TEST_USERID)?;
+        Ok(s)
+    });
+    let mut conn_a = match conn_a {
+        Ok(s) => {
+            report("a. 0xF000 登录 → 0xF001 result=0", Ok(()));
+            Some(s)
+        }
+        Err(e) => {
+            report("a. 0xF000 登录 → 0xF001 result=0", Err(e));
+            None
+        }
+    };
+
+    // b1. 外壳长度合法、envelope f1 声明 0xFFFFFFFF（远超实际）→ checked_add 拒绝，只丢帧不断连
+    if let Some(s) = &mut conn_a {
+        let r = (|| -> Result<(), String> {
+            use std::io::Write;
+            let mut env = vec![0x0A]; // envelope f1 wt2
+            core::host::put_varint(&mut env, 0xFFFF_FFFF); // 声明长度越界
+            env.extend_from_slice(b"xx");
+            let total = 4 + 1 + env.len();
+            let mut frame = Vec::with_capacity(total);
+            frame.extend_from_slice(&(total as u32).to_le_bytes());
+            frame.push(0);
+            frame.extend_from_slice(&env);
+            s.write_all(&frame).map_err(|e| format!("发送畸形帧失败: {e}"))?;
+            // 帧被丢弃后连接应仍可用：ping → pong
+            let mut body = Vec::new();
+            core::host::put_field_varint(&mut body, 1, 0);
+            probe_send(s, core::host::MSG_EDITOR_PING, &body)?;
+            probe_wait(s, core::host::MSG_EDITOR_PING_RES)?;
+            Ok(())
+        })();
+        report("b1. envelope 声明长度越界 → 丢帧、连接存活（ping/pong）", r);
+    }
+
+    // b2. 外壳总长声明 0x7FFFFFFF（> 64MB 上限）→ read_frame 拒绝，服务端关闭本连接
+    if let Some(s) = &mut conn_a {
+        let r = (|| -> Result<(), String> {
+            use std::io::Write;
+            let mut frame = Vec::new();
+            frame.extend_from_slice(&0x7FFF_FFFFu32.to_le_bytes());
+            frame.push(0);
+            frame.extend_from_slice(b"garbage");
+            s.write_all(&frame).map_err(|e| format!("发送超大声明帧失败: {e}"))?;
+            // 读到 EOF/对端 RST = 边界拒绝生效；读超时（连接仍在）= 拒绝失效
+            loop {
+                match probe_read_frame(s) {
+                    Ok(None) => return Ok(()),
+                    Ok(Some(f)) if f.msg_type == core::host::MSG_NOTIFY_EDITOR_LOG => continue,
+                    Ok(Some(f)) => return Err(format!("收到意外帧 {:#x}（连接未被关闭）", f.msg_type)),
+                    Err(e) if e == "读超时" => return Err("连接未被关闭（3s 读超时）".into()),
+                    Err(e) if e.starts_with("读帧") => return Ok(()), // 对端 RST 等 = 连接被关
+                    Err(e) => return Err(format!("连接未被关闭且收到垃圾: {e}")),
+                }
+            }
+        })();
+        report("b2. 外壳声明超大（>64MB）→ 边界拒绝，连接被关", r);
+    }
+    drop(conn_a);
+
+    // c. 重连再登录 result=0（critical#1 回归：畸形帧未杀死 host 主循环）
+    let r = probe_connect(bind_addr, port).and_then(|mut s| {
+        probe_login(&mut s, TEST_USERID)?;
+        Ok(s)
+    });
+    let mut conn_c = match r {
+        Ok(s) => {
+            report("c. 畸形帧后重连登录 result=0（host 主循环存活）", Ok(()));
+            Some(s)
+        }
+        Err(e) => {
+            report("c. 畸形帧后重连登录 result=0（host 主循环存活）", Err(e));
+            None
+        }
+    };
+
+    // d. 0xF01B teardown 帧：停局不应断连（ping/pong 验证连接仍可用）
+    if let Some(s) = &mut conn_c {
+        let r = (|| -> Result<(), String> {
+            probe_send(s, core::host::MSG_DESTROY_GAME, &[])?;
+            let mut body = Vec::new();
+            core::host::put_field_varint(&mut body, 1, 0);
+            probe_send(s, core::host::MSG_EDITOR_PING, &body)?;
+            probe_wait(s, core::host::MSG_EDITOR_PING_RES)?;
+            Ok(())
+        })();
+        report("d. 0xF01B teardown 后连接仍可用（ping/pong）", r);
+    }
+    drop(conn_c);
+
+    // 收尾：停 host 释放端口
+    core::game_host::stop_running();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    if failed > 0 {
+        println!("host probe 完成：{failed} 项失败");
+        std::process::exit(1);
+    }
+    println!("host probe 全部通过");
+}
+
 /// 应用状态
 struct App {
     project_root: Option<PathBuf>,
@@ -699,6 +1199,8 @@ struct App {
     login_state: Option<core::login::LoginState>,
     login_grant: Option<core::login::DeviceGrant>,
     login_rx: Option<std::sync::mpsc::Receiver<core::login::LoginState>>,
+    /// 扫码轮询取消标志（「取消登录」置位，后台线程尽快退出）
+    login_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
     // 调试
     debug_session: Option<core::debug::DebugSession>,
     debug_status: Option<core::debug::DebugStatus>,
@@ -718,6 +1220,8 @@ struct App {
     ls_new_name: String,
     ls_clients: ui::local_server::ClientMap,
     ls_launch_rx: Option<std::sync::mpsc::Receiver<Result<(i64, u32), String>>>,
+    /// host 启动/重启结果通道（工作线程 → UI，失败写状态栏）
+    ls_host_rx: Option<std::sync::mpsc::Receiver<Result<u16, String>>>,
     /// 本地服务器日志面板：缓冲（logbus 拉取）/ 已消费序号 / 滚屏开关 / 关键字筛选
     ls_logs: std::collections::VecDeque<String>,
     ls_log_seq: u64,
@@ -745,6 +1249,7 @@ impl Default for App {
             login_state: None,
             login_grant: None,
             login_rx: None,
+            login_cancel: None,
             debug_session: None,
             debug_status: None,
             debug_staging_input: String::new(),
@@ -759,6 +1264,7 @@ impl Default for App {
             ls_new_name: String::new(),
             ls_clients: Default::default(),
             ls_launch_rx: None,
+            ls_host_rx: None,
             ls_logs: Default::default(),
             ls_log_seq: 0,
             ls_log_scroll: true,

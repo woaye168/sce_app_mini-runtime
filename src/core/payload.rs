@@ -145,7 +145,7 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
     }
     log(format!("在线版本解析到 {} 个包", items.len()));
 
-    let mut registry: Vec<(String, u64)> = Vec::new(); // (name, version) 已落位
+    let mut registry: Vec<(String, u64, String)> = Vec::new(); // (name, version, _m 路径) 已落位
     // 预统计待下载包数（进度「第 i/N 个包」用；判重逻辑与主循环一致）
     let pending_total = items
         .iter()
@@ -156,12 +156,7 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
             let Some((dest_dir, _)) = place_target(params, item) else {
                 return false;
             };
-            let already = if item.name == ENGINE_PACKAGE || item.name == "wineditor" {
-                kind.engine_ready(&params.runtime_dir)
-            } else {
-                dest_dir.exists()
-            };
-            !already
+            !pkg_already(&kind, params, item, &dest_dir)
         })
         .count();
     let mut dl_idx = 0usize;
@@ -175,15 +170,13 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
             continue;
         }
         let (dest_dir, dest_note) = target.unwrap();
-        // 引擎包以 spawn 目标存在与否判重（win→scegame.exe；wineditor→version-<api>/SCE）；包以落位目录判重
-        let already = if item.name == ENGINE_PACKAGE || item.name == "wineditor" {
-            kind.engine_ready(&params.runtime_dir)
-        } else {
-            dest_dir.exists()
-        };
-        if already {
+        // 引擎包以 spawn 目标存在与否判重（win→scegame.exe；wineditor→version-<api>/SCE）；
+        // 基础包比对版本戳；其余包以落位目录判重（见 pkg_already）
+        if pkg_already(&kind, params, item, &dest_dir) {
             log(format!("[skip] {} v{} 已存在", item.name, item.version));
-            registry.push((item.name.clone(), item.version));
+            if let Some(mpath) = registry_mpath(item) {
+                registry.push((item.name.clone(), item.version, mpath));
+            }
             continue;
         }
         if params.dry_run {
@@ -198,6 +191,10 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
         dl_idx += 1;
         let bytes = download(item, dl_idx, pending_total, log)?;
         extract_and_place(&bytes, &dest_dir)?;
+        // 基础包落位目录不含版本号，写版本戳供下次判重比对（否则新版本永远 skip）
+        if BASE_PACKAGES.contains(&item.name.as_str()) {
+            std::fs::write(dest_dir.join(".bgd_version"), item.version.to_string())?;
+        }
         // _m 包： pak 之外再解出散文件（引擎对 _m/maps 库与 _m/script 等按散文件探测优先）
         if REGISTRY_PACKAGES.contains(&item.name.as_str()) || item.path.starts_with("Res/maps") {
             if let Ok(Some(pak)) = find_pak(&dest_dir) {
@@ -216,7 +213,9 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
             }
         }
         log(format!("[ok] {} v{} -> {}", item.name, item.version, dest_note));
-        registry.push((item.name.clone(), item.version));
+        if let Some(mpath) = registry_mpath(item) {
+            registry.push((item.name.clone(), item.version, mpath));
+        }
     }
 
     if params.dry_run {
@@ -224,7 +223,7 @@ pub fn sync(params: &SyncParams, log: &mut dyn FnMut(String)) -> Result<()> {
     }
 
     // ② 合成版本注册表（api_pak_version.json 最小集 + VERSION.JSON 骨架）
-    write_registry_files(params, &items)?;
+    write_registry_files(params, &registry)?;
 
     // ③ 基座资产（update-info 不分发的编辑器资产：ui/font/regular 游戏字体、characters、effect、fonts）
     sync_base_assets(params, log)?;
@@ -461,6 +460,42 @@ fn place_target(params: &SyncParams, item: &UpdateItem) -> Option<(PathBuf, Stri
     None
 }
 
+/// 包判重：引擎包看 spawn 目标；基础包看目录 + 版本戳（首装后版本升级也能重装）；
+/// 其余包（注册表/依赖库，落位路径含版本号）看目录存在性
+fn pkg_already(
+    kind: &crate::core::runtimes::RuntimeKind,
+    params: &SyncParams,
+    item: &UpdateItem,
+    dest_dir: &Path,
+) -> bool {
+    if item.name == ENGINE_PACKAGE || item.name == "wineditor" {
+        return kind.engine_ready(&params.runtime_dir);
+    }
+    if BASE_PACKAGES.contains(&item.name.as_str()) {
+        return dest_dir.is_dir()
+            && std::fs::read_to_string(dest_dir.join(".bgd_version"))
+                .ok()
+                .and_then(|s| s.trim().parse::<u64>().ok())
+                == Some(item.version);
+    }
+    dest_dir.exists()
+}
+
+/// 注册表 #package_path 的 _m 路径（None = 引擎包/基础 Res/ 包，不进注册表）
+fn registry_mpath(item: &UpdateItem) -> Option<String> {
+    let name = item.name.as_str();
+    if name == ENGINE_PACKAGE || name == "wineditor" {
+        return None;
+    }
+    if REGISTRY_PACKAGES.contains(&name) {
+        Some(format!("Res/_m/{}", registry_m_subpath(name)))
+    } else if item.path.starts_with("Res/maps") {
+        Some(format!("Res/_m/{}/{}", item.path.trim_start_matches("Res/"), name))
+    } else {
+        None
+    }
+}
+
 /// 注册表包的 _m 子路径（script 直接在 _m 下；maps 库在 _m/maps 下）
 fn registry_m_subpath(name: &str) -> String {
     match name {
@@ -582,26 +617,16 @@ fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
 /// 规则：凡 _m 落位的包（注册表包 + path 为 Res/maps 的库 + 依赖自动展开项）都进
 /// #package_path 与 <api> 表——global_default/spark_core 等隐式基础库也必须登记，
 /// 否则引擎回退到 Res/maps/<lib> 找不到（0.2.0 实测）。
-fn write_registry_files(params: &SyncParams, items: &[UpdateItem]) -> Result<()> {
+/// 只登记主循环确认真实落位的条目（registry 集合），未下载（空 url）/未落位的不登记。
+fn write_registry_files(params: &SyncParams, registry: &[(String, u64, String)]) -> Result<()> {
     let update_root = params.runtime_dir.join("Update").join(&params.env_domain);
     std::fs::create_dir_all(&update_root)?;
 
     let mut package_path = serde_json::Map::new();
     let mut api_table = serde_json::Map::new();
-    for item in items {
-        let name = item.name.as_str();
-        if name == ENGINE_PACKAGE {
-            continue;
-        }
-        let mpath = if REGISTRY_PACKAGES.contains(&name) {
-            format!("Res/_m/{}", registry_m_subpath(name))
-        } else if item.path.starts_with("Res/maps") {
-            format!("Res/_m/{}/{}", item.path.trim_start_matches("Res/"), name)
-        } else {
-            continue; // 基础 Res/ 包不进注册表
-        };
-        package_path.insert(name.to_string(), Value::String(mpath));
-        api_table.insert(name.to_string(), Value::from(item.version));
+    for (name, version, mpath) in registry {
+        package_path.insert(name.clone(), Value::String(mpath.clone()));
+        api_table.insert(name.clone(), Value::from(*version));
     }
     let mut root = serde_json::Map::new();
     root.insert("#package_path".into(), Value::Object(package_path));
@@ -637,11 +662,25 @@ fn upak_extract(pak: &Path, dest_dir: &Path) -> Result<usize> {
     if !data.starts_with(b"UPAK") {
         return Err(anyhow!("非 UPAK 格式: {}", pak.display()));
     }
-    let count = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+    // 截断/畸形 pak 一律转 Err 不 panic：所有读取经 get() 越界检查
+    let read_u32 = |pos: usize| -> Result<u32> {
+        let b = data
+            .get(pos..pos + 4)
+            .ok_or_else(|| anyhow!("UPAK 截断: 读 u32 越界 @{pos}"))?;
+        Ok(u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let count = read_u32(4)? as usize;
+    // 单条目最小 13 字节（1 字节名 + \0 + 12 字节数值表），count 虚高即畸形（兼防巨额预分配）
+    if count > data.len() / 13 {
+        return Err(anyhow!("UPAK 条目数异常: {count}（文件仅 {} 字节）", data.len()));
+    }
     let mut pos = 12usize;
     let mut entries = Vec::with_capacity(count);
     for _ in 0..count {
-        let end = data[pos..]
+        let rest = data
+            .get(pos..)
+            .ok_or_else(|| anyhow!("UPAK 截断: 条目表越界 @{pos}"))?;
+        let end = rest
             .iter()
             .position(|&b| b == 0)
             .ok_or_else(|| anyhow!("条目名越界"))?
@@ -650,22 +689,27 @@ fn upak_extract(pak: &Path, dest_dir: &Path) -> Result<usize> {
             .map_err(|_| anyhow!("条目名非 utf8"))?
             .to_string();
         pos = end + 1;
-        let off = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]) as usize;
-        let size =
-            u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]]) as usize;
+        let off = read_u32(pos)? as usize;
+        let size = read_u32(pos + 4)? as usize;
         pos += 12; // offset + size + 条目校验
         entries.push((name, off, size));
     }
     let mut written = 0usize;
     for (name, off, size) in &entries {
-        if off + size > data.len() {
-            return Err(anyhow!("条目越界: {name}"));
+        // 路径穿越防护：逐分量仅允许常规名（拒 .. / 盘符 / 根 / 前缀），同 distrib resolve_file
+        for comp in Path::new(name).components() {
+            if !matches!(comp, std::path::Component::Normal(_)) {
+                return Err(anyhow!("条目名含非法路径分量: {name}"));
+            }
         }
+        let content = data
+            .get(*off..*off + *size)
+            .ok_or_else(|| anyhow!("条目越界: {name}"))?;
         let out = dest_dir.join(name);
         if let Some(parent) = out.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(&out, &data[*off..*off + *size])?;
+        std::fs::write(&out, content)?;
         written += 1;
     }
     Ok(written)

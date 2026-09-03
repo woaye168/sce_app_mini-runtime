@@ -16,7 +16,7 @@
 ## 目录结构
 
 ```
-src/main.rs            # 入口（bgd_appsdk 统一入口 + 业务 CLI 分发）+ 应用状态 + 壳实现
+src/main.rs            # 入口（bgd_appsdk 统一入口 + 业务 CLI 分发：auth/debug/host/capture/payload/local + 无 GUI 全量功能测试 staging/selftest/locate/host probe）+ 应用状态 + 壳实现
 src/lib.rs             # 库 crate（pub mod core）——mini-client 启动器复用核心逻辑
 src/bin/mini_client.rs # 对端联机启动器（0.6.0）：输 IP/端口/userid → 引擎官方 OSS + 游戏增量下载 → 进局
 src/core/mod.rs        # 模块声明

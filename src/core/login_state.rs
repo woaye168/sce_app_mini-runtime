@@ -56,7 +56,8 @@ pub fn fetch_identity(runtime_dir: &Path, cred: &UserInfo, env_domain: &str, tim
         .join(format!("user_info-{env_domain}.json"));
     crate::core::auth::write_user_info(&user_info_path, &injected)?;
 
-    // 记录现有最新日志（只认本次新产生的日志）
+    // 记录现有最新日志（路径 + 长度）：客户端可能复用同一日志文件追加写（按日期命名等），
+    // 只比路径会永远跳过读取 → 同路径但长度前进也视为有新内容
     let log_dir = runtime_dir.join("logs").join("game");
     let before = latest_log(&log_dir);
 
@@ -79,9 +80,9 @@ pub fn fetch_identity(runtime_dir: &Path, cred: &UserInfo, env_domain: &str, tim
     let deadline = Instant::now() + timeout;
     let marker = "GamePlayOnline request login, userid:";
     loop {
-        if let Some(log_path) = latest_log(&log_dir) {
+        if let Some((log_path, len)) = latest_log(&log_dir) {
             let is_new = match &before {
-                Some(b) => log_path != *b,
+                Some((b, blen)) => log_path != *b || len > *blen,
                 None => true,
             };
             if is_new {
@@ -104,17 +105,18 @@ pub fn fetch_identity(runtime_dir: &Path, cred: &UserInfo, env_domain: &str, tim
     }
 }
 
-fn latest_log(dir: &Path) -> Option<PathBuf> {
+/// 最新日志（路径, 长度）：长度供调用方判断同路径文件是否有追加
+fn latest_log(dir: &Path) -> Option<(PathBuf, u64)> {
     std::fs::read_dir(dir)
         .ok()?
         .flatten()
         .filter(|e| e.path().extension().map(|x| x == "log").unwrap_or(false))
         .filter_map(|e| {
-            let m = e.metadata().ok()?.modified().ok()?;
-            Some((e.path(), m))
+            let m = e.metadata().ok()?;
+            Some((e.path(), m.modified().ok()?, m.len()))
         })
-        .max_by_key(|(_, m)| *m)
-        .map(|(p, _)| p)
+        .max_by_key(|(_, m, _)| *m)
+        .map(|(p, _, len)| (p, len))
 }
 
 /// 从日志文本抓最后一处 `GamePlayOnline request login, userid: <N>, username: <N>`

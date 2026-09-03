@@ -60,6 +60,8 @@ function installHooks() {
     Interceptor.attach(ws.findExportByName('WSARecv'), {
         onEnter(args) { this.s = args[0].toString(); this.bufs = args[1]; this.cnt = args[2].toInt32(); this.got = args[3]; },
         onLeave(rv) {
+            // SOCKET_ERROR 时 lpNumberOfBytesRecvd 不写入，计数是陈旧值，整条丢弃
+            if (rv.toInt32() !== 0) return;
             try {
                 const n = this.got.readU32();
                 if (n > 0) {

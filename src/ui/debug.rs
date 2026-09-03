@@ -271,7 +271,11 @@ impl App {
                     }
                 }
                 if matches!(st, DebugStatus::Exited(_) | DebugStatus::Failed(_)) {
-                    self.debug_session = None;
+                    // 自然退出/失败同样走 stop() 清理：taskkill 附加客户端 + 断控制连接
+                    // （对已退出 pid 幂等无害），与「停止调试」按钮路径行为一致，防孤儿进程
+                    if let Some(mut session) = self.debug_session.take() {
+                        session.stop();
+                    }
                 }
             }
             if ui.button("停止调试").clicked() {
@@ -282,6 +286,12 @@ impl App {
                 self.debug_status = None;
                 self.status = "已停止".to_string();
             }
+        }
+        // 有在途后台任务（启动中）或存活 session 时周期重绘：
+        // 工作线程完成/客户端退出无需用户交互即可回收刷新（drain 已非阻塞，poll 很便宜）
+        if self.debug_start_rx.is_some() || self.debug_session.is_some() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
         }
     }
 }

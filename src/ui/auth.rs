@@ -184,9 +184,11 @@ impl App {
                         }
                     });
                     if ui.button("删除").clicked() {
-                        // store.remove：删的是当前激活项时自动切到剩余第一条
-                        self.cred_store.remove(&label);
-                        self.status = format!("已删除：{label}");
+                        // store.remove：删的是当前激活项时自动切到剩余第一条；落盘失败上抛提示
+                        self.status = match self.cred_store.remove(&label) {
+                            Ok(_) => format!("已删除：{label}"),
+                            Err(e) => format!("已删除：{label}（但凭证库落盘失败：{e}）"),
+                        };
                     }
                 });
             });
@@ -228,15 +230,19 @@ impl App {
                             Err(e) => self.status = format!("二维码生成失败：{e}"),
                         }
                         self.login_state = Some(login::LoginState::Pending);
-                        // 后台线程轮询，结果经 channel 回来，不卡 UI
+                        // 后台线程轮询，结果经 channel 回来，不卡 UI；
+                        // 取消标志：「取消登录」置位后轮询线程尽快退出，防僵尸轮询泄漏
                         let (tx, rx) = std::sync::mpsc::channel();
                         let env = locate.env_domain.clone();
                         let g = grant.clone();
+                        let cancel = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                        let cancel2 = cancel.clone();
                         std::thread::spawn(move || {
-                            let st = login::poll_device_token(&env, &g, |_| {});
+                            let st = login::poll_device_token(&env, &g, |_| {}, Some(&cancel2));
                             let _ = tx.send(st);
                         });
                         self.login_rx = Some(rx);
+                        self.login_cancel = Some(cancel);
                         self.login_grant = Some(grant);
                     }
                     Err(e) => self.status = format!("申请失败：{e}"),
@@ -273,13 +279,25 @@ impl App {
                 }
                 self.login_state = Some(st);
                 self.login_rx = None;
+                self.login_cancel = None;
             }
             if ui.button("取消登录").clicked() {
+                // 先置取消标志让后台轮询线程尽快退出，再丢弃前端状态
+                if let Some(cancel) = &self.login_cancel {
+                    cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
                 self.login_grant = None;
                 self.login_qr = None;
                 self.login_state = None;
                 self.login_rx = None;
+                self.login_cancel = None;
             }
+        }
+        // 有在途后台任务（验证/刷新/扫码轮询）时周期重绘：
+        // 工作线程完成后无需用户交互即可回收结果显示（防状态栏停在「验证中...」）
+        if self.verify_rx.is_some() || self.refresh_rx.is_some() || self.login_rx.is_some() {
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(500));
         }
     }
 }

@@ -32,7 +32,9 @@ pub fn push(line: String) {
     bus.lines.push_back((seq, line));
 }
 
-/// 取 last_seq 之后的新日志，返回（最新 seq, 新行）
+/// 取 last_seq 之后的新日志，返回（最新 seq, 新行）。
+/// 缓冲满溢出丢最旧行会造成 seq 空洞：在新行首部插一条提示行，
+/// 让消费者能区分「无新日志」与「中间丢了一段」（首次拉取 last_seq=0 不报）
 pub fn fetch_after(last_seq: u64) -> (u64, Vec<String>) {
     let g = BUS.lock().unwrap();
     let Some(bus) = g.as_ref() else {
@@ -40,6 +42,13 @@ pub fn fetch_after(last_seq: u64) -> (u64, Vec<String>) {
     };
     let mut out = Vec::new();
     let mut max = last_seq;
+    if last_seq > 0 {
+        if let Some((first, _)) = bus.lines.front() {
+            if *first > last_seq + 1 {
+                out.push(format!("……（日志缓冲溢出，丢失 {} 行）……", first - last_seq - 1));
+            }
+        }
+    }
     for (seq, line) in bus.lines.iter() {
         if *seq > last_seq {
             out.push(line.clone());

@@ -33,7 +33,12 @@ pub fn create(project_root: &Path, runtime_dir: &Path, project_name: &str) -> Re
         .map(|n| n.to_string_lossy().to_string())
         .ok_or_else(|| anyhow!("项目路径异常"))?;
     let staging = runtime_dir.join("User").join("debug").join(&dir_name);
-    std::fs::create_dir_all(&staging)?;
+    create_at(project_root, &staging, project_name)
+}
+
+/// 在指定目录生成暂存（create 的布局推导与生成主体分离；CLI `staging create --staging` 直指定目录用）
+pub fn create_at(project_root: &Path, staging: &Path, project_name: &str) -> Result<PathBuf> {
+    std::fs::create_dir_all(staging)?;
 
     // 白名单目录增量同步（优先硬链接；目标已存在且同源（size+mtime 一致）则跳过）
     let mut updated = 0u32;
@@ -42,6 +47,9 @@ pub fn create(project_root: &Path, runtime_dir: &Path, project_name: &str) -> Re
         let src = project_root.join(d);
         if src.is_dir() {
             if !sync_dir(&src, &staging.join(d), linked_mode, &mut updated)? {
+                if linked_mode {
+                    crate::core::logbus::push("[staging] [warn] 硬链接不受支持（跨卷），已降级为复制模式同步".into());
+                }
                 linked_mode = false; // 硬链接不受支持（跨卷），后续目录走复制
             }
         }
@@ -56,6 +64,12 @@ pub fn create(project_root: &Path, runtime_dir: &Path, project_name: &str) -> Re
     }
     if updated > 0 {
         crate::core::logbus::push(format!("[staging] 增量更新 {updated} 个文件（{}）", if linked_mode { "硬链接" } else { "复制" }));
+    }
+
+    // 清理 staging 中项目侧已删除/改名的残留（防陈旧文件经 manifest 下发远端客户端）
+    let removed = prune_staging(project_root, &staging)?;
+    if removed > 0 {
+        crate::core::logbus::push(format!("[staging] 清理残留 {removed} 项"));
     }
 
     // ui/script/main.lua：项目已有（编辑器/bgd 生成过）则沿用；否则按官方规则包装生成
@@ -78,7 +92,7 @@ pub fn create(project_root: &Path, runtime_dir: &Path, project_name: &str) -> Re
         }
     }
 
-    Ok(staging)
+    Ok(staging.to_path_buf())
 }
 
 /// 客户端入口包装：官方模板头 + `---origin_main_file---` + 源 ui/src/main.lua 原文 + `---ts_module---` 尾
@@ -207,24 +221,29 @@ fn files_equal(a: &Path, b: &Path) -> bool {
 /// 目录树增量同步：递归逐文件判定。**硬链接仅在从未成功过的目录尝试**（hard_link 失败一次
 /// 即整体转复制模式，避免"内容判定后 remove+hard_link 失败"丢文件），返回 false 由调用方转复制。
 /// changed 全局记忆：父目录发生过更新后，其余兄弟目录一律走复制模式（防 linked 残留判定漏拷）。
+/// 降级不中断遍历：hard_link 失败的本文件复制落位后继续同步同目录剩余条目，仅在返回时上报降级。
 fn sync_dir(src: &Path, dst: &Path, linked_mode: bool, updated: &mut u32) -> Result<bool> {
     std::fs::create_dir_all(dst)?;
+    let mut linked = linked_mode;
+    let mut degraded = false; // 本目录树发生过硬链接降级（跨卷），返回 false 让后续目录直接复制
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let s = entry.path();
         let d = dst.join(entry.file_name());
         if s.is_dir() {
-            if !sync_dir(&s, &d, linked_mode, updated)? {
-                return Ok(false);
+            if !sync_dir(&s, &d, linked, updated)? {
+                // 子目录降级：本目录剩余条目继续用复制模式走完，不中断遍历
+                linked = false;
+                degraded = true;
             }
         } else if files_equal(&s, &d) {
             continue;
-        } else if linked_mode && !d.exists() {
-            // 快路径：目标不存在（首装）直接硬链接；失败 = 跨卷，整体降级
+        } else if linked && !d.exists() {
+            // 快路径：目标不存在（首装）直接硬链接；失败 = 跨卷，本文件降级复制并继续遍历
             if std::fs::hard_link(&s, &d).is_err() {
                 std::fs::copy(&s, &d)?;
-                *updated += 1;
-                return Ok(false);
+                linked = false;
+                degraded = true;
             }
             *updated += 1;
         } else {
@@ -234,5 +253,48 @@ fn sync_dir(src: &Path, dst: &Path, linked_mode: bool, updated: &mut u32) -> Res
             *updated += 1;
         }
     }
-    Ok(true)
+    Ok(!degraded)
+}
+
+/// 清理 staging 白名单范围内项目侧已不存在的条目（删除/改名残留会随 manifest 下发远端）。
+/// 仅清理白名单目录/文件；ui/script 为工具自生成目录（包装入口 + 触发器 stub），整目录跳过。
+fn prune_staging(project_root: &Path, staging: &Path) -> Result<u32> {
+    let mut removed = 0u32;
+    let ui_script = staging.join("ui").join("script");
+    for d in DIRS {
+        prune_dir(&project_root.join(d), &staging.join(d), &ui_script, &mut removed)?;
+    }
+    for f in FILES {
+        let d = staging.join(f);
+        if d.is_file() && !project_root.join(f).is_file() {
+            std::fs::remove_file(&d)?;
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+/// 递归清理 dst 中 src 已不存在的条目
+fn prune_dir(src: &Path, dst: &Path, ui_script: &Path, removed: &mut u32) -> Result<()> {
+    let Ok(entries) = std::fs::read_dir(dst) else {
+        return Ok(()); // dst 不存在（源端本就没有该目录）
+    };
+    for entry in entries.flatten() {
+        let d = entry.path();
+        if d == ui_script {
+            continue; // 工具自生成目录，不归源端管
+        }
+        let s = src.join(entry.file_name());
+        if !s.exists() {
+            if d.is_dir() {
+                std::fs::remove_dir_all(&d)?;
+            } else {
+                std::fs::remove_file(&d)?;
+            }
+            *removed += 1;
+        } else if d.is_dir() && s.is_dir() {
+            prune_dir(&s, &d, ui_script, removed)?;
+        }
+    }
+    Ok(())
 }

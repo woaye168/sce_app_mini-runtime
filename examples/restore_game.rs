@@ -148,6 +148,16 @@ fn u32le(b: &[u8], o: usize) -> u32 {
     u32::from_le_bytes(b[o..o + 4].try_into().unwrap())
 }
 
+/// 解码单个 4×4 BC block（bcdec_rs 输出 RGBA，dst 按 pitch 行距写入）
+fn bc_decode_block(ifmt: u32, blk: &[u8], dst: &mut [u8], pitch: usize) {
+    match ifmt {
+        IFMT_BC7 => bcdec_rs::bc7(blk, dst, pitch),
+        IFMT_DXT1 => bcdec_rs::bc1(blk, dst, pitch),
+        IFMT_DXT3 => bcdec_rs::bc2(blk, dst, pitch),
+        _ => bcdec_rs::bc3(blk, dst, pitch),
+    }
+}
+
 /// 解码单个伪 KTX 文件并就地保存为 PNG。非 KTX 返回 Ok(false)。
 ///
 /// 格式（伪装成 KTX 纹理）：
@@ -181,12 +191,32 @@ fn decode_ktx_image(src: &Path) -> Result<bool, String> {
                     data.len()
                 ));
             }
+            // bcdec_rs 一次调用只解一个 4×4 block，需自行按宽高双重循环逐块拼接
             let mut out = vec![0u8; w * h * 4];
-            match ifmt {
-                IFMT_BC7 => bcdec_rs::bc7(data, &mut out, w * 4),
-                IFMT_DXT1 => bcdec_rs::bc1(data, &mut out, w * 4),
-                IFMT_DXT3 => bcdec_rs::bc2(data, &mut out, w * 4),
-                _ => bcdec_rs::bc3(data, &mut out, w * 4),
+            let pitch = w * 4;
+            let (bw, bh) = ((w + 3) / 4, (h + 3) / 4);
+            for by in 0..bh {
+                for bx in 0..bw {
+                    let blk = &data[(by * bw + bx) * block_bytes..];
+                    if bx * 4 + 4 <= w && by * 4 + 4 <= h {
+                        // 完整块：直接解进输出图对应位置
+                        bc_decode_block(ifmt, blk, &mut out[by * 4 * pitch + bx * 16..], pitch);
+                    } else {
+                        // 边缘块（宽高非 4 倍数）：先解到临时 4×4 buffer 再裁剪拷贝，
+                        // 避免越界 panic 或覆写下一行像素
+                        let mut tmp = [0u8; 64];
+                        bc_decode_block(ifmt, blk, &mut tmp, 16);
+                        for row in 0..(h - by * 4).min(4) {
+                            let n = ((w - bx * 4).min(4)) * 4;
+                            let d = (by * 4 + row) * pitch + bx * 16;
+                            out[d..d + n].copy_from_slice(&tmp[row * 16..row * 16 + n]);
+                        }
+                    }
+                }
+            }
+            // 兜底校验：整图全 0（黑透明）说明解码异常，拒绝覆盖并删除源文件
+            if out.iter().all(|&b| b == 0) {
+                return Err(format!("BC 解码结果全黑，疑似解码失败 (0x{ifmt:04x}, {w}x{h})"));
             }
             out
         }

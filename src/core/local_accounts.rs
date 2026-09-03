@@ -23,12 +23,18 @@ fn db_path() -> PathBuf {
 
 fn open() -> Result<Connection> {
     let conn = Connection::open(db_path())?;
+    // 并发 create（各自独立 Connection）时等锁而不是立即 BUSY
+    conn.busy_timeout(std::time::Duration::from_secs(5))?;
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS accounts(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE,
             userid INTEGER NOT NULL UNIQUE,
             created_at TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+        );
+        CREATE TABLE IF NOT EXISTS meta(
+            key TEXT PRIMARY KEY,
+            value INTEGER NOT NULL
         );",
     )?;
     Ok(conn)
@@ -51,21 +57,31 @@ pub fn list() -> Result<Vec<LocalAccount>> {
     Ok(rows)
 }
 
-/// 创建账号：userid = 90000001 + 已有数量段内首个空洞（简化：max+1）
+/// 创建账号：userid 由 meta 计数器单调分配（事务内原子取号+落号；删号不复用——
+/// 旧账号残留的会话/存档/合成凭证会错绑到复用 userid 的新账号上）
 pub fn create(name: &str) -> Result<LocalAccount> {
     let name = name.trim();
     if name.is_empty() {
         return Err(anyhow!("账号名不能为空"));
     }
-    let conn = open()?;
-    let next_uid: i64 = conn
-        .query_row("SELECT COALESCE(MAX(userid), 90000000) + 1 FROM accounts", [], |r| r.get(0))?;
-    conn.execute(
+    let mut conn = open()?;
+    let tx = conn.transaction()?;
+    // 首次使用按现有 MAX 播种（兼容旧库），此后单调递增
+    let next_uid: i64 = tx.query_row(
+        "INSERT INTO meta(key, value)
+         SELECT 'next_userid', COALESCE((SELECT MAX(userid) FROM accounts), 90000000) + 1
+         ON CONFLICT(key) DO UPDATE SET value = value + 1
+         RETURNING value",
+        [],
+        |r| r.get(0),
+    )?;
+    tx.execute(
         "INSERT INTO accounts(name, userid) VALUES(?1, ?2)",
         (name, next_uid),
     )
     .map_err(|e| anyhow!("创建账号失败（重名？）: {e}"))?;
-    let id = conn.last_insert_rowid();
+    let id = tx.last_insert_rowid();
+    tx.commit()?;
     Ok(LocalAccount {
         id,
         name: name.to_string(),

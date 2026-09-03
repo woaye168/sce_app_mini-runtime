@@ -184,13 +184,13 @@ impl CredentialStore {
         Ok(())
     }
 
-    /// 删除条目；若删的是当前激活项，自动切到剩余第一条（无则清空），并落盘
-    pub fn remove(&mut self, label: &str) {
+    /// 删除条目；若删的是当前激活项，自动切到剩余第一条（无则清空），并落盘（落盘失败上抛）
+    pub fn remove(&mut self, label: &str) -> Result<()> {
         self.items.remove(label);
         if self.active_label.as_deref() == Some(label) {
             self.active_label = self.items.keys().next().cloned();
         }
-        let _ = self.save();
+        self.save()
     }
 
     /// 刷新某条目的 userid/user_name（登录态字段），并落盘

@@ -110,9 +110,12 @@ fn find_editor_root(project_root: &Path) -> Result<PathBuf> {
     for root in roots {
         if let Some(s) = root.as_str() {
             // typeRoots 条目形如 <编辑器根>/Res/_m/... 或含 /res/_m/
-            let lower = s.to_lowercase().replace('\\', "/");
+            // 先 replace 得 owned 串再 lowercase 匹配（lowercase 对非 ASCII 可能改变字节长度，
+            // 其下标不能回切原始串；切的是同一 owned 串，与 payload.rs derive_editor_paths 一致）
+            let norm = s.replace('\\', "/");
+            let lower = norm.to_lowercase();
             if let Some(idx) = lower.find("/res/_m/") {
-                let editor_root = PathBuf::from(&s[..idx]);
+                let editor_root = PathBuf::from(&norm[..idx]);
                 if editor_root.is_dir() {
                     return Ok(editor_root);
                 }

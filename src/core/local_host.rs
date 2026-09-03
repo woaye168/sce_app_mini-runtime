@@ -216,68 +216,157 @@ fn control_conn_inner(
             }
         }
     });
-    loop {
-        match read_frame(downstream)? {
-            Some(frame) => {
+    let result = loop {
+        match read_frame(downstream) {
+            Ok(Some(frame)) => {
                 let ty = host::decode_frame(&frame).map(|f| f.msg_type).unwrap_or(0);
                 capture(shared, "tcp.d2u", Some(ty), &frame, "");
-                up_write
-                    .write_all(&frame)
-                    .map_err(|e| anyhow!("转发上行失败: {e}"))?;
+                if let Err(e) = up_write.write_all(&frame) {
+                    break Err(anyhow!("转发上行失败: {e}"));
+                }
             }
-            None => break,
+            Ok(None) => break Ok(()),
+            Err(e) => break Err(e),
         }
-    }
+    };
+    // 主循环退出（编辑器断开/出错）后先断开云端上游再 join：u2d 线程阻塞在对上游的
+    // 无限期阻塞读上（into_stream 已清读超时），不 shutdown 则 join 永久挂起，
+    // 控制处理线程 + 云端控制连接逐会话泄漏
+    let _ = up_write.shutdown(std::net::Shutdown::Both);
     let _ = u2d.join();
-    Ok(())
+    result
+}
+
+/// UDP 映射空闲超时：120s 无流量回收（socket 随 Arc 释放，上行收包线程自检退出）
+const UDP_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// 单客户端上行映射
+struct UpEntry {
+    sock: Arc<UdpSocket>,
+    /// 建映射时的云端端点（g.cloud re-assign 变更后旧映射作废重建，防发往已失效的旧云端）
+    cloud_ep: (String, u16),
+    /// 最近活跃时间（与上行收包线程共享，驱动空闲淘汰）
+    last_active: Arc<Mutex<Instant>>,
 }
 
 /// UDP KCP NAT 转发：每客户端源地址一条上行 socket；port_offset = 相对云端控制端口的偏移（0 / +50）
 fn udp_relay(down: UdpSocket, shared: SharedRef, port_offset: u16) -> Result<()> {
     let down = Arc::new(down);
-    let mut upstreams: HashMap<SocketAddr, Arc<UdpSocket>> = HashMap::new();
+    // 周期性醒来做空闲淘汰（recv 本身无限期阻塞，无超时则淘汰永远没机会执行）
+    down.set_read_timeout(Some(Duration::from_secs(30)))?;
+    let mut upstreams: HashMap<SocketAddr, UpEntry> = HashMap::new();
     let mut buf = [0u8; 65536];
     loop {
         let (n, client) = match down.recv_from(&mut buf) {
             Ok(v) => v,
-            Err(e) => return Err(anyhow!("UDP 收包失败: {e}")),
+            Err(e)
+                if e.kind() == std::io::ErrorKind::WouldBlock
+                    || e.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                // 空闲淘汰：回收长时间无流量的映射（上行收包线程自检同一时间自行退出）
+                upstreams.retain(|_, e| {
+                    e.last_active.lock().unwrap().elapsed() < UDP_IDLE_TIMEOUT
+                });
+                continue;
+            }
+            // 单包 IO 错误只记日志跳过，不杀死整个 relay 线程
+            Err(e) => {
+                log_line(&format!("UDP 收包错误(+{port_offset}): {e}"));
+                continue;
+            }
         };
+        // 每次收包读最新云端（re-assign 后 g.cloud 会被覆盖）
         let cloud = shared.lock().unwrap().cloud.clone();
         let Some(cloud) = cloud else {
             log_line("UDP 包到达但云端未 assign（丢弃）");
             continue;
         };
-        let cloud_port = cloud.port + port_offset;
-        let up = match upstreams.get(&client) {
-            Some(s) => Arc::clone(s),
-            None => {
-                let sock = UdpSocket::bind("0.0.0.0:0")?;
-                sock.connect(format!("{}:{}", cloud.ip, cloud_port))?;
-                let sock = Arc::new(sock);
-                // 上行收包线程：云 → 客户端
-                let up_clone = Arc::clone(&sock);
-                let down_clone = Arc::clone(&down);
-                let shared2 = Arc::clone(&shared);
-                std::thread::spawn(move || {
-                    let mut rbuf = [0u8; 65536];
-                    loop {
-                        match up_clone.recv(&mut rbuf) {
-                            Ok(m) => {
-                                capture(&shared2, "udp.h2c", None, &rbuf[..m], "");
-                                let _ = down_clone.send_to(&rbuf[..m], client);
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                });
-                log_line(&format!("KCP 客户端接入: {client} → {}:{}", cloud.ip, cloud_port));
-                upstreams.insert(client, Arc::clone(&sock));
-                sock
-            }
+        let Some(cloud_port) = cloud.port.checked_add(port_offset) else {
+            log_line(&format!(
+                "云端端口溢出: {} + {port_offset}（丢弃 UDP 包）",
+                cloud.port
+            ));
+            continue;
         };
+        let ep = (cloud.ip.clone(), cloud_port);
+        // 云端 re-assign 后端点变化 → 旧映射作废重建（其收包线程随空闲超时自行退出）
+        if let Some(old) = upstreams.get(&client) {
+            if old.cloud_ep != ep {
+                log_line(&format!("云端端点变更，重建 KCP 映射: {client}"));
+                upstreams.remove(&client);
+            }
+        }
+        if !upstreams.contains_key(&client) {
+            match new_up_entry(&down, &shared, client, ep.clone()) {
+                Ok(entry) => {
+                    log_line(&format!("KCP 客户端接入: {client} → {}:{}", ep.0, ep.1));
+                    upstreams.insert(client, entry);
+                }
+                // 单客户端建映射失败不影响其他客户端
+                Err(e) => {
+                    log_line(&format!("KCP 上行建映射失败 {client}: {e}"));
+                    continue;
+                }
+            }
+        }
+        let entry = upstreams.get(&client).unwrap();
+        *entry.last_active.lock().unwrap() = Instant::now();
         capture(&shared, "udp.c2h", None, &buf[..n], "");
-        up.send(&buf[..n])?;
+        if let Err(e) = entry.sock.send(&buf[..n]) {
+            // 单包发送失败（如 ICMP unreachable）只记日志，relay 继续
+            log_line(&format!("UDP 上行发送错误 {client}: {e}"));
+        }
     }
+}
+
+/// 建单客户端上行映射（connected UDP + 云→客户端收包线程）
+fn new_up_entry(
+    down: &Arc<UdpSocket>,
+    shared: &SharedRef,
+    client: SocketAddr,
+    ep: (String, u16),
+) -> Result<UpEntry> {
+    let sock = UdpSocket::bind("0.0.0.0:0")?;
+    sock.connect(format!("{}:{}", ep.0, ep.1))?;
+    // 周期醒来自检空闲超时：connected UDP 无 shutdown 且线程自持 Arc，
+    // 映射被淘汰后只能靠此处自行退出，否则线程随映射永久泄漏
+    sock.set_read_timeout(Some(Duration::from_secs(30)))?;
+    let sock = Arc::new(sock);
+    let last_active = Arc::new(Mutex::new(Instant::now()));
+    // 上行收包线程：云 → 客户端
+    let up_clone = Arc::clone(&sock);
+    let down_clone = Arc::clone(down);
+    let shared2 = Arc::clone(shared);
+    let last2 = Arc::clone(&last_active);
+    std::thread::spawn(move || {
+        let mut rbuf = [0u8; 65536];
+        loop {
+            match up_clone.recv(&mut rbuf) {
+                Ok(m) => {
+                    *last2.lock().unwrap() = Instant::now();
+                    capture(&shared2, "udp.h2c", None, &rbuf[..m], "");
+                    let _ = down_clone.send_to(&rbuf[..m], client);
+                }
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::WouldBlock
+                        || e.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    // 空闲超时自行退出（映射由 relay 主循环回收）
+                    if last2.lock().unwrap().elapsed() >= UDP_IDLE_TIMEOUT {
+                        break;
+                    }
+                }
+                // 单包 IO 错误（Windows connected UDP 收 ICMP unreachable 报 WSAECONNRESET）
+                // 不杀线程——线程死了映射还在表中，该客户端会只有上行没有下行
+                Err(e) => log_line(&format!("KCP 上行收包错误 {client}: {e}")),
+            }
+        }
+    });
+    Ok(UpEntry {
+        sock,
+        cloud_ep: ep,
+        last_active,
+    })
 }
 
 /// 前台阻塞跑中继 host（CLI host start / debug start --host local 的线程体）
@@ -285,7 +374,12 @@ pub fn run(params: LocalHostParams, ready_tx: Option<std::sync::mpsc::Sender<Res
     let addr = format!("127.0.0.1:{}", params.port);
     let tcp = TcpListener::bind(&addr).map_err(|e| anyhow!("TCP 监听失败 {addr}: {e}"))?;
     // KCP 会话端口 = 控制端口 + 50（引擎硬编码规律，见文件头注释）；UDP 双端口监听
-    let kcp_addr = format!("127.0.0.1:{}", params.port + 50);
+    // checked_add 防 u16 溢出（port > 65485 时 debug panic / release 回绕到错误端口）
+    let kcp_port = params
+        .port
+        .checked_add(50)
+        .ok_or_else(|| anyhow!("KCP 会话端口溢出: {} + 50", params.port))?;
+    let kcp_addr = format!("127.0.0.1:{kcp_port}");
     let udp = UdpSocket::bind(&addr).map_err(|e| anyhow!("UDP 绑定失败 {addr}: {e}"))?;
     let udp_kcp = UdpSocket::bind(&kcp_addr).map_err(|e| anyhow!("UDP 绑定失败 {kcp_addr}: {e}"))?;
     let capture = match &params.capture_path {
